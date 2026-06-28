@@ -1,6 +1,8 @@
 package com.nedrichards.plexwear.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,10 +17,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -30,6 +37,7 @@ import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TimeText
 import com.nedrichards.plexwear.data.BrowseItem
 import com.nedrichards.plexwear.data.PlexTrack
+import kotlinx.coroutines.launch
 
 @Composable
 fun PlexWearApp(viewModel: PlexWearViewModel) {
@@ -73,10 +81,26 @@ private fun PlexWearScreen(
   onTranscode: (PlexTrack) -> Unit,
   onPlaylists: () -> Unit,
 ) {
+  val scrollState = rememberScrollState()
+  val focusRequester = FocusRequester()
+  val coroutineScope = rememberCoroutineScope()
+
+  LaunchedEffect(state.screen, state.title) {
+    focusRequester.requestFocus()
+  }
+
   Column(
     modifier = Modifier
       .fillMaxSize()
-      .verticalScroll(rememberScrollState())
+      .focusRequester(focusRequester)
+      .onRotaryScrollEvent {
+        coroutineScope.launch {
+          scrollState.scrollBy(it.verticalScrollPixels)
+        }
+        true
+      }
+      .focusable()
+      .verticalScroll(scrollState)
       .padding(horizontal = 14.dp, vertical = 26.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.spacedBy(8.dp),
