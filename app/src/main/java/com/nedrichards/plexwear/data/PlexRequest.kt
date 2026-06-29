@@ -39,15 +39,17 @@ object PlexRequestBuilder {
 
   fun transcodeUrl(credentials: PlexCredentials, track: PlexTrack): String = build(
     credentials = credentials,
-    path = "/music/:/transcode/universal/start.m3u8",
-    query = mapOf(
+    path = "/music/:/transcode/universal/start",
+    query = clientHeaders + mapOf(
       "path" to track.key,
-      "protocol" to "hls",
+      "protocol" to "http",
       "directPlay" to "0",
       "directStream" to "0",
       "audioCodec" to "aac",
-      "audioBitrate" to "128",
+      "audioBitrate" to "192",
       "maxAudioChannels" to "2",
+      "X-Plex-Container-Start" to "0",
+      "X-Plex-Container-Size" to "1",
     ),
   ).url
 

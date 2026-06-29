@@ -28,6 +28,7 @@ data class PlexTrack(
   val durationMs: Long?,
   val thumb: String?,
   val partKey: String?,
+  val audioCodec: String? = null,
 )
 
 sealed interface BrowseItem {

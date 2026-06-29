@@ -14,6 +14,10 @@ plex.token=your-plex-token
 The debug build copies those values into DataStore on first launch through `PlexAuthStore`.
 Release builds set the generated Plex `BuildConfig` fields to empty strings.
 
+## Playback
+
+Playback is automatic from a single track tap. The app direct plays MP3 and AAC, direct plays FLAC when the configured Plex server URL looks local/private and otherwise uses Plex's HTTP AAC transcode endpoint for FLAC to avoid high-bandwidth remote streaming. If the first playback path fails during startup, the app silently falls back to the other path.
+
 ## Validation
 
 Use a repo-local Gradle cache:

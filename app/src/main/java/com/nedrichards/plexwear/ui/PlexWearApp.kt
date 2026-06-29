@@ -63,7 +63,6 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
           }
         },
         onPlay = { viewModel.play(it) },
-        onTranscode = { viewModel.play(it, preferTranscode = true) },
         onPlaylists = viewModel::loadPlaylists,
       )
     }
@@ -78,7 +77,6 @@ private fun PlexWearScreen(
   onReset: () -> Unit,
   onItemClick: (BrowseItem) -> Unit,
   onPlay: (PlexTrack) -> Unit,
-  onTranscode: (PlexTrack) -> Unit,
   onPlaylists: () -> Unit,
 ) {
   val scrollState = rememberScrollState()
@@ -131,8 +129,8 @@ private fun PlexWearScreen(
     when (state.screen) {
       Screen.Home -> HomeContent(state, onItemClick, onPlay, onPlaylists, onSettings)
       Screen.Albums, Screen.Playlists -> BrowseContent(state.items, onItemClick, onHome)
-      Screen.Tracks -> TracksContent(state.tracks, onPlay, onTranscode, onHome)
-      Screen.NowPlaying -> NowPlayingContent(state.nowPlaying, onHome, onTranscode)
+      Screen.Tracks -> TracksContent(state.tracks, onPlay, onHome)
+      Screen.NowPlaying -> NowPlayingContent(state.nowPlaying, onHome)
       Screen.Settings -> SettingsContent(state, onHome, onReset)
     }
   }
@@ -170,14 +168,10 @@ private fun BrowseContent(
 private fun TracksContent(
   tracks: List<PlexTrack>,
   onPlay: (PlexTrack) -> Unit,
-  onTranscode: (PlexTrack) -> Unit,
   onHome: () -> Unit,
 ) {
   if (tracks.isEmpty()) StatusText("No tracks found.")
   tracks.forEach { track -> TrackRow(track, onPlay) }
-  tracks.firstOrNull()?.let { firstTrack ->
-    AppButton(text = "Try AAC stream", onClick = { onTranscode(firstTrack) })
-  }
   AppButton(text = "Home", onClick = onHome)
 }
 
@@ -185,13 +179,11 @@ private fun TracksContent(
 private fun NowPlayingContent(
   track: PlexTrack?,
   onHome: () -> Unit,
-  onTranscode: (PlexTrack) -> Unit,
 ) {
   StatusText("Now playing")
   track?.let {
     Text(it.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
     it.artist?.let { artist -> StatusText(artist) }
-    AppButton(text = "Try AAC stream", onClick = { onTranscode(it) })
   }
   AppButton(text = "Home", onClick = onHome)
 }

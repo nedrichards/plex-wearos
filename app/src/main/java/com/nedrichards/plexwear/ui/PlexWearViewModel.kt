@@ -108,14 +108,9 @@ class PlexWearViewModel(
     }
   }
 
-  fun play(track: PlexTrack, preferTranscode: Boolean = false) {
+  fun play(track: PlexTrack) {
     withCredentials { credentials ->
-      val item = if (preferTranscode) {
-        PlexMediaItems.transcode(credentials, track)
-      } else {
-        PlexMediaItems.direct(credentials, track)
-      }
-      playbackController.play(item)
+      playbackController.play(PlexMediaItems.playbackPlan(credentials, track))
       _uiState.update { it.copy(screen = Screen.NowPlaying, nowPlaying = track, error = null) }
     }
   }

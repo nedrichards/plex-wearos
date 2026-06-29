@@ -37,9 +37,11 @@ class PlexRequestBuilderTest {
 
     val url = PlexRequestBuilder.transcodeUrl(credentials, track)
 
-    assertTrue(url.contains("/music/:/transcode/universal/start.m3u8?"))
+    assertTrue(url.contains("/music/:/transcode/universal/start?"))
+    assertTrue(url.contains("protocol=http"))
     assertTrue(url.contains("audioCodec=aac"))
-    assertTrue(url.contains("audioBitrate=128"))
+    assertTrue(url.contains("audioBitrate=192"))
     assertTrue(url.contains("directPlay=0"))
+    assertTrue(url.contains("X-Plex-Container-Size=1"))
   }
 }

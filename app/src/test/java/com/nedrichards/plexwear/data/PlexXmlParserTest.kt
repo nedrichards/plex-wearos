@@ -53,5 +53,6 @@ class PlexXmlParserTest {
     assertEquals("Artist", track.artist)
     assertEquals(123000L, track.durationMs)
     assertEquals("/library/parts/99/file.flac", track.partKey)
+    assertEquals("flac", track.audioCodec)
   }
 }

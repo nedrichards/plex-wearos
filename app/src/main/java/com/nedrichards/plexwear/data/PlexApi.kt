@@ -83,6 +83,7 @@ object PlexXmlParser {
         ?: trackElement.optionalAttr("parentThumb")
         ?: trackElement.optionalAttr("grandparentThumb"),
       partKey = trackElement.firstNestedAttr("Part", "key") ?: trackElement.optionalAttr("mediaKey"),
+      audioCodec = trackElement.firstNestedAttr("Media", "audioCodec"),
     )
   }
 

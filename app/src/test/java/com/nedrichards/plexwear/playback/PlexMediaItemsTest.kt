@@ -3,6 +3,7 @@ package com.nedrichards.plexwear.playback
 import com.nedrichards.plexwear.auth.PlexCredentials
 import com.nedrichards.plexwear.data.PlexTrack
 import junit.framework.TestCase.assertEquals
+import junit.framework.TestCase.assertNotNull
 import org.junit.Test
 
 class PlexMediaItemsTest {
@@ -28,4 +29,61 @@ class PlexMediaItemsTest {
     assertEquals("Album", spec.album)
     assertEquals("https://plex.example.test/library/parts/42/file.mp3?X-Plex-Token=token", spec.uri)
   }
+
+  @Test
+  fun playbackPlan_usesDirectWithTranscodeFallbackForMp3() {
+    val plan = PlexMediaItems.playbackPlanSpec(
+      credentials = PlexCredentials("https://plex.example.test", "token"),
+      track = track(audioCodec = "mp3", partKey = "/library/parts/42/file.mp3"),
+    )
+
+    assertEquals("https://plex.example.test/library/parts/42/file.mp3?X-Plex-Token=token", plan.primary.uri)
+    assertNotNull(plan.fallback)
+  }
+
+  @Test
+  fun playbackPlan_usesDirectForLocalFlac() {
+    val plan = PlexMediaItems.playbackPlanSpec(
+      credentials = PlexCredentials("https://192-168-1-92.example.plex.direct:32400", "token"),
+      track = track(audioCodec = "flac", partKey = "/library/parts/42/file.flac"),
+    )
+
+    assertEquals("https://192-168-1-92.example.plex.direct:32400/library/parts/42/file.flac?X-Plex-Token=token", plan.primary.uri)
+    assertNotNull(plan.fallback)
+  }
+
+  @Test
+  fun playbackPlan_usesTranscodeWithDirectFallbackForRemoteFlac() {
+    val plan = PlexMediaItems.playbackPlanSpec(
+      credentials = PlexCredentials("https://plex.example.test", "token"),
+      track = track(audioCodec = "flac", partKey = "/library/parts/42/file.flac"),
+    )
+
+    assertEquals("https://plex.example.test/music/:/transcode/universal/start", plan.primary.uri.substringBefore("?"))
+    assertEquals("https://plex.example.test/library/parts/42/file.flac?X-Plex-Token=token", plan.fallback?.uri)
+  }
+
+  @Test
+  fun playbackPlan_usesTranscodeWithDirectFallbackForUnknownCodecs() {
+    val plan = PlexMediaItems.playbackPlanSpec(
+      credentials = PlexCredentials("https://plex.example.test", "token"),
+      track = track(audioCodec = null, partKey = "/library/parts/42/file.wav"),
+    )
+
+    assertEquals("https://plex.example.test/music/:/transcode/universal/start", plan.primary.uri.substringBefore("?"))
+    assertEquals("https://plex.example.test/library/parts/42/file.wav?X-Plex-Token=token", plan.fallback?.uri)
+  }
+
+  private fun track(audioCodec: String?, partKey: String?): PlexTrack =
+    PlexTrack(
+      ratingKey = "42",
+      key = "/library/metadata/42",
+      title = "Song",
+      album = "Album",
+      artist = "Artist",
+      durationMs = 180000,
+      thumb = null,
+      partKey = partKey,
+      audioCodec = audioCodec,
+    )
 }
