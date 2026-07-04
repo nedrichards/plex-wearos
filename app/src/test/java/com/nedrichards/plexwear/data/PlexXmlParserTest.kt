@@ -34,6 +34,20 @@ class PlexXmlParserTest {
   }
 
   @Test
+  fun playlists_readsCompositeArtwork() {
+    val xml = """
+      <MediaContainer>
+        <Playlist key="/playlists/1/items" title="Running" duration="120000" composite="/composite.jpg" />
+      </MediaContainer>
+    """.trimIndent()
+
+    val playlist = PlexXmlParser.playlists(xml).single()
+
+    assertEquals("Running", playlist.title)
+    assertEquals("/composite.jpg", playlist.thumb)
+  }
+
+  @Test
   fun tracks_readsPlayablePartKeyAndMetadata() {
     val xml = """
       <MediaContainer>

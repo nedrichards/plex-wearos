@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,7 +22,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
@@ -40,6 +38,7 @@ import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TimeText
 import androidx.wear.input.RemoteInputIntentHelper
 import com.nedrichards.plexwear.BuildConfig
+import com.nedrichards.plexwear.auth.PlexCredentials
 import com.nedrichards.plexwear.data.BrowseItem
 import com.nedrichards.plexwear.data.PlexTrack
 import kotlinx.coroutines.launch
@@ -84,6 +83,11 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
           }
         },
         onPlay = { viewModel.play(it) },
+        onPlayAll = { viewModel.playAll(it) },
+        onCurrentPlayback = viewModel::openCurrentPlayback,
+        onTogglePlayback = viewModel::togglePlayback,
+        onPrevious = viewModel::skipToPrevious,
+        onNext = viewModel::skipToNext,
         onPlaylists = viewModel::loadPlaylists,
       )
     }
@@ -102,6 +106,11 @@ private fun PlexWearScreen(
   onClearSearch: () -> Unit,
   onItemClick: (BrowseItem) -> Unit,
   onPlay: (PlexTrack) -> Unit,
+  onPlayAll: (List<PlexTrack>) -> Unit,
+  onCurrentPlayback: () -> Unit,
+  onTogglePlayback: () -> Unit,
+  onPrevious: () -> Unit,
+  onNext: () -> Unit,
   onPlaylists: () -> Unit,
 ) {
   val scrollState = rememberScrollState()
@@ -150,11 +159,15 @@ private fun PlexWearScreen(
       return@Column
     }
 
+    if (state.canOpenCurrentPlayback) {
+      AppButton(text = "Now playing", onClick = onCurrentPlayback)
+    }
+
     when (state.screen) {
       Screen.Home -> HomeContent(state, onItemClick, onPlay, onPlaylists, onSettings)
       Screen.Albums, Screen.Playlists -> BrowseContent(state, onItemClick, onHome, onSearch, onClearSearch)
-      Screen.Tracks -> TracksContent(state, onPlay, onHome, onSearch, onClearSearch)
-      Screen.NowPlaying -> NowPlayingContent(state.nowPlaying, onHome)
+      Screen.Tracks -> TracksContent(state, onPlay, onPlayAll, onHome, onSearch, onClearSearch)
+      Screen.NowPlaying -> NowPlayingContent(state, onTogglePlayback, onPrevious, onNext, onHome)
       Screen.Settings -> SettingsContent(state, onHome, onReset)
     }
   }
@@ -169,10 +182,10 @@ private fun HomeContent(
   onSettings: () -> Unit,
 ) {
   AppButton(text = "Playlists", onClick = onPlaylists)
-  state.items.forEach { item -> BrowseRow(item, onItemClick) }
+  state.items.forEach { item -> BrowseRow(state.credentials, item, onItemClick) }
   if (state.tracks.isNotEmpty()) {
     SectionLabel("Recent")
-    state.tracks.forEach { track -> TrackRow(track, onPlay) }
+    state.tracks.forEach { track -> TrackRow(state.credentials, track, onPlay) }
   }
   AppButton(text = "Settings", onClick = onSettings)
 }
@@ -213,7 +226,7 @@ private fun BrowseContent(
   val items = filterBrowseItems(state.items, state.searchQuery)
   SearchControls(state.searchQuery, onSearch, onClearSearch)
   if (items.isEmpty()) StatusText(if (state.searching) "No matches." else "Nothing found.")
-  items.forEach { item -> BrowseRow(item, onItemClick) }
+  items.forEach { item -> BrowseRow(state.credentials, item, onItemClick) }
   AppButton(text = "Home", onClick = onHome)
 }
 
@@ -221,6 +234,7 @@ private fun BrowseContent(
 private fun TracksContent(
   state: PlexWearUiState,
   onPlay: (PlexTrack) -> Unit,
+  onPlayAll: (List<PlexTrack>) -> Unit,
   onHome: () -> Unit,
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
@@ -228,7 +242,8 @@ private fun TracksContent(
   val tracks = filterTracks(state.tracks, state.searchQuery)
   SearchControls(state.searchQuery, onSearch, onClearSearch)
   if (tracks.isEmpty()) StatusText(if (state.searching) "No matches." else "No tracks found.")
-  tracks.forEach { track -> TrackRow(track, onPlay) }
+  if (tracks.isNotEmpty()) AppButton(text = "Play all", onClick = { onPlayAll(tracks) })
+  tracks.forEach { track -> TrackRow(state.credentials, track, onPlay) }
   AppButton(text = "Home", onClick = onHome)
 }
 
@@ -247,13 +262,39 @@ private fun SearchControls(
 
 @Composable
 private fun NowPlayingContent(
-  track: PlexTrack?,
+  state: PlexWearUiState,
+  onTogglePlayback: () -> Unit,
+  onPrevious: () -> Unit,
+  onNext: () -> Unit,
   onHome: () -> Unit,
 ) {
-  StatusText("Now playing")
-  track?.let {
+  state.nowPlayingContext?.let {
+    Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+  }
+  if (state.nowPlayingTrackCount > 1) {
+    StatusText("${state.nowPlayingIndex + 1} of ${state.nowPlayingTrackCount}")
+  }
+  state.nowPlaying?.let {
     Text(it.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
     it.artist?.let { artist -> StatusText(artist) }
+  }
+  AppButton(text = if (state.playbackPaused) "Resume" else "Pause", onClick = onTogglePlayback)
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    AppButton(
+      text = "Previous",
+      onClick = onPrevious,
+      enabled = state.canPlayPrevious,
+      modifier = Modifier.weight(1f),
+    )
+    AppButton(
+      text = "Next",
+      onClick = onNext,
+      enabled = state.canPlayNext,
+      modifier = Modifier.weight(1f),
+    )
   }
   AppButton(text = "Home", onClick = onHome)
 }
@@ -273,7 +314,7 @@ private fun SettingsContent(
 }
 
 @Composable
-private fun BrowseRow(item: BrowseItem, onClick: (BrowseItem) -> Unit) {
+private fun BrowseRow(credentials: PlexCredentials, item: BrowseItem, onClick: (BrowseItem) -> Unit) {
   val title = when (item) {
     is BrowseItem.LibraryItem -> item.library.title
     is BrowseItem.AlbumItem -> item.album.title
@@ -286,21 +327,41 @@ private fun BrowseRow(item: BrowseItem, onClick: (BrowseItem) -> Unit) {
     is BrowseItem.PlaylistItem -> item.playlist.durationMs?.formatDuration()
     is BrowseItem.TrackItem -> item.track.artist
   }
+  val artworkPath = when (item) {
+    is BrowseItem.LibraryItem -> null
+    is BrowseItem.AlbumItem -> item.album.thumb
+    is BrowseItem.PlaylistItem -> item.playlist.thumb
+    is BrowseItem.TrackItem -> item.track.thumb
+  }
 
-  AppRow(title = title, subtitle = subtitle, onClick = { onClick(item) })
+  AppRow(
+    credentials = credentials,
+    title = title,
+    subtitle = subtitle,
+    artworkPath = artworkPath,
+    onClick = { onClick(item) },
+  )
 }
 
 @Composable
-private fun TrackRow(track: PlexTrack, onPlay: (PlexTrack) -> Unit) {
+private fun TrackRow(credentials: PlexCredentials, track: PlexTrack, onPlay: (PlexTrack) -> Unit) {
   AppRow(
+    credentials = credentials,
     title = track.title,
     subtitle = listOfNotNull(track.artist, track.durationMs?.formatDuration()).joinToString(" - ").ifBlank { null },
+    artworkPath = track.thumb,
     onClick = { onPlay(track) },
   )
 }
 
 @Composable
-private fun AppRow(title: String, subtitle: String?, onClick: () -> Unit) {
+private fun AppRow(
+  credentials: PlexCredentials,
+  title: String,
+  subtitle: String?,
+  artworkPath: String?,
+  onClick: () -> Unit,
+) {
   Button(
     onClick = onClick,
     modifier = Modifier.fillMaxWidth(),
@@ -311,11 +372,10 @@ private fun AppRow(title: String, subtitle: String?, onClick: () -> Unit) {
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      Box(
-        modifier = Modifier
-          .size(18.dp)
-          .clip(CircleShape)
-          .background(MaterialTheme.colorScheme.primary),
+      PlexArtwork(
+        credentials = credentials,
+        thumbPath = artworkPath,
+        contentDescription = null,
       )
       Column(Modifier.weight(1f)) {
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -333,10 +393,16 @@ private fun AppRow(title: String, subtitle: String?, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AppButton(text: String, onClick: () -> Unit) {
+private fun AppButton(
+  text: String,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  enabled: Boolean = true,
+) {
   Button(
     onClick = onClick,
-    modifier = Modifier.fillMaxWidth(),
+    enabled = enabled,
+    modifier = modifier.fillMaxWidth(),
   ) {
     Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
   }

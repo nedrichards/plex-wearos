@@ -16,15 +16,37 @@ class PlaybackController(private val context: Context) {
   private var controller: MediaController? = null
 
   suspend fun play(plan: PlexPlaybackPlan) {
+    play(listOf(plan))
+  }
+
+  suspend fun play(plans: List<PlexPlaybackPlan>) {
+    if (plans.isEmpty()) return
     val mediaController = controller ?: connect().also { controller = it }
-    val prepared = mediaController.prepareAndPlay(plan.primary)
-    if (!prepared && plan.fallback != null) {
-      mediaController.prepareAndPlay(plan.fallback)
+    val prepared = mediaController.prepareAndPlay(plans.map { it.primary })
+    if (!prepared && plans.any { it.fallback != null }) {
+      mediaController.prepareAndPlay(plans.map { it.fallback ?: it.primary })
     }
   }
 
-  private suspend fun MediaController.prepareAndPlay(item: MediaItem): Boolean {
-    setMediaItem(item)
+  suspend fun resume() {
+    val mediaController = controller ?: connect().also { controller = it }
+    mediaController.play()
+  }
+
+  suspend fun pause() {
+    controller?.pause()
+  }
+
+  suspend fun skipToNext() {
+    controller?.seekToNextMediaItem()
+  }
+
+  suspend fun skipToPrevious() {
+    controller?.seekToPreviousMediaItem()
+  }
+
+  private suspend fun MediaController.prepareAndPlay(items: List<MediaItem>): Boolean {
+    setMediaItems(items)
     prepare()
     play()
     return awaitReadyOrError()

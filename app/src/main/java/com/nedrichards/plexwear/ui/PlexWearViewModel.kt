@@ -37,6 +37,11 @@ data class PlexWearUiState(
   val items: List<BrowseItem> = emptyList(),
   val tracks: List<PlexTrack> = emptyList(),
   val nowPlaying: PlexTrack? = null,
+  val nowPlayingContext: String? = null,
+  val nowPlayingTrackCount: Int = 0,
+  val nowPlayingQueue: List<PlexTrack> = emptyList(),
+  val nowPlayingIndex: Int = -1,
+  val playbackPaused: Boolean = false,
   val loading: Boolean = true,
   val error: String? = null,
   val auth: PlexAuthUiState = PlexAuthUiState(),
@@ -45,6 +50,9 @@ data class PlexWearUiState(
 ) {
   val configured: Boolean = credentials.isConfigured
   val searching: Boolean = searchQuery.isNotBlank()
+  val canOpenCurrentPlayback: Boolean = nowPlaying != null && screen != Screen.NowPlaying
+  val canPlayPrevious: Boolean = nowPlayingIndex > 0
+  val canPlayNext: Boolean = nowPlayingIndex >= 0 && nowPlayingIndex < nowPlayingQueue.lastIndex
 }
 
 enum class Screen {
@@ -137,7 +145,109 @@ class PlexWearViewModel(
   fun play(track: PlexTrack) {
     withCredentials { credentials ->
       playbackController.play(PlexMediaItems.playbackPlan(credentials, track))
-      _uiState.update { it.copy(screen = Screen.NowPlaying, nowPlaying = track, error = null, searchQuery = "") }
+      _uiState.update {
+        it.copy(
+          screen = Screen.NowPlaying,
+          title = "Now playing",
+          nowPlaying = track,
+          nowPlayingContext = null,
+          nowPlayingTrackCount = 1,
+          nowPlayingQueue = listOf(track),
+          nowPlayingIndex = 0,
+          playbackPaused = false,
+          error = null,
+          searchQuery = "",
+        )
+      }
+    }
+  }
+
+  fun playAll(tracks: List<PlexTrack>) {
+    if (tracks.isEmpty()) return
+    withCredentials { credentials ->
+      playbackController.play(tracks.map { PlexMediaItems.playbackPlan(credentials, it) })
+      _uiState.update {
+        it.copy(
+          screen = Screen.NowPlaying,
+          title = "Now playing",
+          nowPlaying = tracks.first(),
+          nowPlayingContext = it.title,
+          nowPlayingTrackCount = tracks.size,
+          nowPlayingQueue = tracks,
+          nowPlayingIndex = 0,
+          playbackPaused = false,
+          error = null,
+          searchQuery = "",
+        )
+      }
+    }
+  }
+
+  fun openCurrentPlayback() {
+    _uiState.update {
+      if (it.nowPlaying == null) {
+        it
+      } else {
+        it.copy(screen = Screen.NowPlaying, title = "Now playing", error = null, searchQuery = "")
+      }
+    }
+  }
+
+  fun togglePlayback() {
+    viewModelScope.launch {
+      val paused = _uiState.value.playbackPaused
+      if (paused) {
+        playbackController.resume()
+      } else {
+        playbackController.pause()
+      }
+      _uiState.update {
+        if (it.nowPlaying == null) it else it.copy(playbackPaused = !paused, error = null)
+      }
+    }
+  }
+
+  fun skipToPrevious() {
+    viewModelScope.launch {
+      val state = _uiState.value
+      val previousIndex = state.nowPlayingIndex - 1
+      if (previousIndex !in state.nowPlayingQueue.indices) return@launch
+
+      playbackController.skipToPrevious()
+      _uiState.update {
+        if (it.nowPlayingQueue.indices.contains(previousIndex)) {
+          it.copy(
+            nowPlaying = it.nowPlayingQueue[previousIndex],
+            nowPlayingIndex = previousIndex,
+            playbackPaused = false,
+            error = null,
+          )
+        } else {
+          it
+        }
+      }
+    }
+  }
+
+  fun skipToNext() {
+    viewModelScope.launch {
+      val state = _uiState.value
+      val nextIndex = state.nowPlayingIndex + 1
+      if (nextIndex !in state.nowPlayingQueue.indices) return@launch
+
+      playbackController.skipToNext()
+      _uiState.update {
+        if (it.nowPlayingQueue.indices.contains(nextIndex)) {
+          it.copy(
+            nowPlaying = it.nowPlayingQueue[nextIndex],
+            nowPlayingIndex = nextIndex,
+            playbackPaused = false,
+            error = null,
+          )
+        } else {
+          it
+        }
+      }
     }
   }
 
@@ -245,6 +355,11 @@ class PlexWearViewModel(
           items = emptyList(),
           tracks = emptyList(),
           nowPlaying = null,
+          nowPlayingContext = null,
+          nowPlayingTrackCount = 0,
+          nowPlayingQueue = emptyList(),
+          nowPlayingIndex = -1,
+          playbackPaused = false,
           loading = false,
           error = null,
           auth = PlexAuthUiState(),

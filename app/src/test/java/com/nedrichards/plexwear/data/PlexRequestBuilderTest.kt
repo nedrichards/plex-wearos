@@ -44,4 +44,16 @@ class PlexRequestBuilderTest {
     assertTrue(url.contains("directPlay=0"))
     assertTrue(url.contains("X-Plex-Container-Size=1"))
   }
+
+  @Test
+  fun artworkUrl_requestsSmallTranscodedImage() {
+    val url = PlexRequestBuilder.artworkUrl(credentials, "/library/metadata/42/thumb/1", 96)
+
+    assertTrue(url.startsWith("https://plex.example.test/photo/:/transcode?"))
+    assertTrue(url.contains("url=%2Flibrary%2Fmetadata%2F42%2Fthumb%2F1"))
+    assertTrue(url.contains("width=96"))
+    assertTrue(url.contains("height=96"))
+    assertTrue(url.contains("upscale=0"))
+    assertTrue(url.contains("X-Plex-Token=secret+token"))
+  }
 }

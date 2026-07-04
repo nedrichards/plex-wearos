@@ -53,5 +53,17 @@ object PlexRequestBuilder {
     ),
   ).url
 
+  fun artworkUrl(credentials: PlexCredentials, thumbPath: String, sizePx: Int): String = build(
+    credentials = credentials,
+    path = "/photo/:/transcode",
+    query = mapOf(
+      "url" to thumbPath,
+      "width" to sizePx.toString(),
+      "height" to sizePx.toString(),
+      "minSize" to "1",
+      "upscale" to "0",
+    ),
+  ).url
+
   private fun String.urlEncode(): String = URLEncoder.encode(this, Charsets.UTF_8.name())
 }

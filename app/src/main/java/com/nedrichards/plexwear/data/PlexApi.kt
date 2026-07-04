@@ -64,6 +64,7 @@ object PlexXmlParser {
       key = key,
       title = title,
       durationMs = attrs["duration"]?.toLongOrNull(),
+      thumb = attrs["composite"] ?: attrs["thumb"],
     )
   }
 

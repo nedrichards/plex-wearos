@@ -17,6 +17,7 @@ data class PlexPlaylist(
   val key: String,
   val title: String,
   val durationMs: Long?,
+  val thumb: String? = null,
 )
 
 data class PlexTrack(
