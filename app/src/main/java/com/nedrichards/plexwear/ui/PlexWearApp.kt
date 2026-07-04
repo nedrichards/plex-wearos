@@ -35,6 +35,7 @@ import androidx.wear.compose.material3.CircularProgressIndicator
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TimeText
+import com.nedrichards.plexwear.BuildConfig
 import com.nedrichards.plexwear.data.BrowseItem
 import com.nedrichards.plexwear.data.PlexTrack
 import kotlinx.coroutines.launch
@@ -54,6 +55,8 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
         onHome = viewModel::loadHome,
         onSettings = viewModel::openSettings,
         onReset = viewModel::resetAuth,
+        onStartPinAuth = viewModel::startPinAuth,
+        onCancelPinAuth = viewModel::cancelPinAuth,
         onItemClick = { item ->
           when (item) {
             is BrowseItem.LibraryItem -> viewModel.loadAlbums(item.library)
@@ -75,6 +78,8 @@ private fun PlexWearScreen(
   onHome: () -> Unit,
   onSettings: () -> Unit,
   onReset: () -> Unit,
+  onStartPinAuth: () -> Unit,
+  onCancelPinAuth: () -> Unit,
   onItemClick: (BrowseItem) -> Unit,
   onPlay: (PlexTrack) -> Unit,
   onPlaylists: () -> Unit,
@@ -120,9 +125,8 @@ private fun PlexWearScreen(
       StatusText(it)
     }
 
-    if (!state.configured) {
-      StatusText("Add plex.serverUrl and plex.token to local.properties, then install debug.")
-      AppButton(text = "Settings", onClick = onSettings)
+    if (!state.configured && state.screen != Screen.Settings) {
+      OnboardingContent(state.auth, onStartPinAuth, onCancelPinAuth, onSettings)
       return@Column
     }
 
@@ -151,6 +155,31 @@ private fun HomeContent(
     state.tracks.forEach { track -> TrackRow(track, onPlay) }
   }
   AppButton(text = "Settings", onClick = onSettings)
+}
+
+@Composable
+private fun OnboardingContent(
+  auth: PlexAuthUiState,
+  onStartPinAuth: () -> Unit,
+  onCancelPinAuth: () -> Unit,
+  onSettings: () -> Unit,
+) {
+  auth.message?.let { StatusText(it) }
+  auth.pinCode?.let { code ->
+    Text(
+      text = code,
+      style = MaterialTheme.typography.titleLarge,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+  }
+  if (auth.waiting) {
+    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+    AppButton(text = "Cancel", onClick = onCancelPinAuth)
+  } else {
+    AppButton(text = "Sign in with Plex", onClick = onStartPinAuth)
+    AppButton(text = "Settings", onClick = onSettings)
+  }
 }
 
 @Composable
@@ -194,7 +223,10 @@ private fun SettingsContent(
   onHome: () -> Unit,
   onReset: () -> Unit,
 ) {
-  StatusText(if (state.configured) "Debug credentials are stored on this watch." else "No credentials stored.")
+  StatusText(if (state.configured) "Credentials are stored on this watch." else "No credentials stored.")
+  if (BuildConfig.DEBUG) {
+    StatusText("Debug builds still seed plex.serverUrl and plex.token when local.properties is set.")
+  }
   AppButton(text = "Reset auth", onClick = onReset)
   AppButton(text = "Home", onClick = onHome)
 }

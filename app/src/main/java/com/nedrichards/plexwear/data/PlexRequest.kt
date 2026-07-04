@@ -9,7 +9,7 @@ data class PlexRequest(
 )
 
 object PlexRequestBuilder {
-  private val clientHeaders = mapOf(
+  internal val clientHeaders = mapOf(
     "Accept" to "application/xml",
     "X-Plex-Client-Identifier" to "plex-wearos-debug",
     "X-Plex-Device" to "Wear OS",

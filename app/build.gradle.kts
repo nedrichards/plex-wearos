@@ -36,6 +36,7 @@ android {
             buildConfigField("String", "DEBUG_PLEX_SERVER_URL", "\"\"")
             buildConfigField("String", "DEBUG_PLEX_TOKEN", "\"\"")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

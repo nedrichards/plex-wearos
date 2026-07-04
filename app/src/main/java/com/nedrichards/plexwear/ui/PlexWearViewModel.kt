@@ -3,6 +3,7 @@ package com.nedrichards.plexwear.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.nedrichards.plexwear.auth.PlexAuthClient
 import com.nedrichards.plexwear.auth.PlexAuthStore
 import com.nedrichards.plexwear.auth.PlexCredentials
 import com.nedrichards.plexwear.data.BrowseItem
@@ -13,12 +14,22 @@ import com.nedrichards.plexwear.data.PlexRepository
 import com.nedrichards.plexwear.data.PlexTrack
 import com.nedrichards.plexwear.playback.PlaybackController
 import com.nedrichards.plexwear.playback.PlexMediaItems
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+data class PlexAuthUiState(
+  val pinCode: String? = null,
+  val message: String? = null,
+  val waiting: Boolean = false,
+)
 
 data class PlexWearUiState(
   val credentials: PlexCredentials = PlexCredentials("", ""),
@@ -28,6 +39,7 @@ data class PlexWearUiState(
   val nowPlaying: PlexTrack? = null,
   val loading: Boolean = true,
   val error: String? = null,
+  val auth: PlexAuthUiState = PlexAuthUiState(),
   val screen: Screen = Screen.Home,
 ) {
   val configured: Boolean = credentials.isConfigured
@@ -46,8 +58,10 @@ class PlexWearViewModel(
   application: Application,
   private val authStore: PlexAuthStore,
   private val repository: PlexRepository,
+  private val authClient: PlexAuthClient,
 ) : AndroidViewModel(application) {
   private val playbackController = PlaybackController(application)
+  private var authJob: Job? = null
   private val _uiState = MutableStateFlow(PlexWearUiState())
   val uiState: StateFlow<PlexWearUiState> = _uiState.asStateFlow()
 
@@ -119,8 +133,87 @@ class PlexWearViewModel(
     _uiState.update { it.copy(screen = Screen.Settings, title = "Settings", loading = false, error = null) }
   }
 
+  fun startPinAuth() {
+    if (authJob?.isActive == true) return
+    authJob = viewModelScope.launch {
+      _uiState.update {
+        it.copy(
+          title = "Sign in",
+          loading = false,
+          error = null,
+          auth = PlexAuthUiState(message = "Requesting sign-in code...", waiting = true),
+        )
+      }
+
+      try {
+        val pin = authClient.createPin()
+        _uiState.update {
+          it.copy(
+            auth = PlexAuthUiState(
+              pinCode = pin.code,
+              message = "Enter this code at plex.tv/link.",
+              waiting = true,
+            ),
+          )
+        }
+
+        val deadline = System.currentTimeMillis() + AUTH_TIMEOUT_MS
+        var token: String? = null
+        while (isActive && token == null && System.currentTimeMillis() < deadline) {
+          delay(PIN_POLL_INTERVAL_MS)
+          token = authClient.pollPin(pin.id)
+        }
+
+        if (token == null) {
+          _uiState.update {
+            it.copy(
+              auth = PlexAuthUiState(message = "Sign-in timed out."),
+              error = "Try sign in again.",
+            )
+          }
+          return@launch
+        }
+
+        _uiState.update {
+          it.copy(auth = it.auth.copy(message = "Finding your Plex server...", waiting = true))
+        }
+        val credentials = authClient.credentialsForToken(token)
+        authStore.save(credentials.serverUrl, credentials.token)
+        _uiState.update {
+          it.copy(
+            credentials = credentials,
+            title = "Plex Wear",
+            screen = Screen.Home,
+            auth = PlexAuthUiState(),
+            error = null,
+            loading = false,
+          )
+        }
+        loadHome()
+      } catch (exception: CancellationException) {
+        throw exception
+      } catch (throwable: Throwable) {
+        _uiState.update {
+          it.copy(
+            auth = PlexAuthUiState(message = "Sign-in failed."),
+            error = throwable.message ?: "Plex sign-in failed",
+            loading = false,
+          )
+        }
+      }
+    }
+  }
+
+  fun cancelPinAuth() {
+    authJob?.cancel()
+    authJob = null
+    _uiState.update { it.copy(auth = PlexAuthUiState(), error = null, loading = false) }
+  }
+
   fun resetAuth() {
     viewModelScope.launch {
+      authJob?.cancel()
+      authJob = null
       authStore.clear()
       authStore.seedDebugCredentialsIfNeeded()
       val credentials = authStore.credentials.first()
@@ -134,6 +227,7 @@ class PlexWearViewModel(
           nowPlaying = null,
           loading = false,
           error = null,
+          auth = PlexAuthUiState(),
         )
       }
       if (credentials.isConfigured) loadHome()
@@ -141,6 +235,7 @@ class PlexWearViewModel(
   }
 
   override fun onCleared() {
+    authJob?.cancel()
     playbackController.release()
   }
 
@@ -149,7 +244,13 @@ class PlexWearViewModel(
       val credentials = authStore.credentials.first()
       if (!credentials.isConfigured) {
         _uiState.update {
-          it.copy(credentials = credentials, loading = false, error = "Add plex.serverUrl and plex.token to local.properties.")
+          it.copy(
+            credentials = credentials,
+            screen = Screen.Home,
+            title = "Plex Wear",
+            loading = false,
+            error = "Sign in with Plex or use debug credentials.",
+          )
         }
         return@launch
       }
@@ -161,5 +262,10 @@ class PlexWearViewModel(
         _uiState.update { it.copy(loading = false, error = throwable.message ?: "Plex request failed") }
       }
     }
+  }
+
+  private companion object {
+    const val PIN_POLL_INTERVAL_MS = 3_000L
+    const val AUTH_TIMEOUT_MS = 10 * 60 * 1000L
   }
 }

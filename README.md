@@ -2,9 +2,21 @@
 
 Standalone Wear OS music playback spike for a Plex server.
 
+## Plex sign-in
+
+On first launch, sign in with the code shown on the watch at:
+
+```text
+https://plex.tv/link
+```
+
+The app stores the selected Plex server URL and server token locally on the
+watch.
+
 ## Debug Plex credentials
 
-For the first playback spike, seed a debug build from uncommitted `local.properties`:
+For personal debug installs, you can still seed a debug build from uncommitted
+`local.properties`:
 
 ```properties
 plex.serverUrl=https://your-plex-server.example
@@ -25,7 +37,7 @@ Use a repo-local Gradle cache:
 ```sh
 JAVA_HOME=/var/home/nedr/.jdks/jbr-17.0.14 \
 GRADLE_USER_HOME=/var/home/nedr/Projects/plex-wearos/.gradle-local \
-./gradlew testDebugUnitTest assembleDebug
+./gradlew testDebugUnitTest assembleDebug assembleRelease
 ```
 
 Check the watch-only manifest gate:
