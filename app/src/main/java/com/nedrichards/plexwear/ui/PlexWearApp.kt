@@ -1,5 +1,6 @@
 package com.nedrichards.plexwear.ui
 
+import android.app.RemoteInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.scrollBy
@@ -28,6 +29,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
@@ -35,6 +38,7 @@ import androidx.wear.compose.material3.CircularProgressIndicator
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TimeText
+import androidx.wear.input.RemoteInputIntentHelper
 import com.nedrichards.plexwear.BuildConfig
 import com.nedrichards.plexwear.data.BrowseItem
 import com.nedrichards.plexwear.data.PlexTrack
@@ -43,6 +47,18 @@ import kotlinx.coroutines.launch
 @Composable
 fun PlexWearApp(viewModel: PlexWearViewModel) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
+  val searchLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.StartActivityForResult(),
+  ) { activityResult ->
+    val query = activityResult.data
+      ?.let(RemoteInput::getResultsFromIntent)
+      ?.getCharSequence(KEY_SEARCH_QUERY)
+      ?.toString()
+    if (query != null) {
+      viewModel.setSearchQuery(query)
+    }
+  }
+
   MaterialTheme {
     Box(
       modifier = Modifier
@@ -57,6 +73,8 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
         onReset = viewModel::resetAuth,
         onStartPinAuth = viewModel::startPinAuth,
         onCancelPinAuth = viewModel::cancelPinAuth,
+        onSearch = { searchLauncher.launch(searchInputIntent()) },
+        onClearSearch = viewModel::clearSearchQuery,
         onItemClick = { item ->
           when (item) {
             is BrowseItem.LibraryItem -> viewModel.loadAlbums(item.library)
@@ -80,6 +98,8 @@ private fun PlexWearScreen(
   onReset: () -> Unit,
   onStartPinAuth: () -> Unit,
   onCancelPinAuth: () -> Unit,
+  onSearch: () -> Unit,
+  onClearSearch: () -> Unit,
   onItemClick: (BrowseItem) -> Unit,
   onPlay: (PlexTrack) -> Unit,
   onPlaylists: () -> Unit,
@@ -132,8 +152,8 @@ private fun PlexWearScreen(
 
     when (state.screen) {
       Screen.Home -> HomeContent(state, onItemClick, onPlay, onPlaylists, onSettings)
-      Screen.Albums, Screen.Playlists -> BrowseContent(state.items, onItemClick, onHome)
-      Screen.Tracks -> TracksContent(state.tracks, onPlay, onHome)
+      Screen.Albums, Screen.Playlists -> BrowseContent(state, onItemClick, onHome, onSearch, onClearSearch)
+      Screen.Tracks -> TracksContent(state, onPlay, onHome, onSearch, onClearSearch)
       Screen.NowPlaying -> NowPlayingContent(state.nowPlaying, onHome)
       Screen.Settings -> SettingsContent(state, onHome, onReset)
     }
@@ -184,24 +204,45 @@ private fun OnboardingContent(
 
 @Composable
 private fun BrowseContent(
-  items: List<BrowseItem>,
+  state: PlexWearUiState,
   onItemClick: (BrowseItem) -> Unit,
   onHome: () -> Unit,
+  onSearch: () -> Unit,
+  onClearSearch: () -> Unit,
 ) {
-  if (items.isEmpty()) StatusText("Nothing found.")
+  val items = filterBrowseItems(state.items, state.searchQuery)
+  SearchControls(state.searchQuery, onSearch, onClearSearch)
+  if (items.isEmpty()) StatusText(if (state.searching) "No matches." else "Nothing found.")
   items.forEach { item -> BrowseRow(item, onItemClick) }
   AppButton(text = "Home", onClick = onHome)
 }
 
 @Composable
 private fun TracksContent(
-  tracks: List<PlexTrack>,
+  state: PlexWearUiState,
   onPlay: (PlexTrack) -> Unit,
   onHome: () -> Unit,
+  onSearch: () -> Unit,
+  onClearSearch: () -> Unit,
 ) {
-  if (tracks.isEmpty()) StatusText("No tracks found.")
+  val tracks = filterTracks(state.tracks, state.searchQuery)
+  SearchControls(state.searchQuery, onSearch, onClearSearch)
+  if (tracks.isEmpty()) StatusText(if (state.searching) "No matches." else "No tracks found.")
   tracks.forEach { track -> TrackRow(track, onPlay) }
   AppButton(text = "Home", onClick = onHome)
+}
+
+@Composable
+private fun SearchControls(
+  query: String,
+  onSearch: () -> Unit,
+  onClearSearch: () -> Unit,
+) {
+  if (query.isNotBlank()) {
+    StatusText("Search: $query")
+    AppButton(text = "Clear search", onClick = onClearSearch)
+  }
+  AppButton(text = "Search", onClick = onSearch)
 }
 
 @Composable
@@ -326,4 +367,20 @@ private fun Long.formatDuration(): String {
   val minutes = totalSeconds / 60
   val seconds = totalSeconds % 60
   return "$minutes:${seconds.toString().padStart(2, '0')}"
+}
+
+private const val KEY_SEARCH_QUERY = "plex_search_query"
+
+private fun searchInputIntent() = RemoteInputIntentHelper.createActionRemoteInputIntent().apply {
+  val remoteInputs = listOf(
+    RemoteInput.Builder(KEY_SEARCH_QUERY)
+      .setLabel("Search Plex")
+      .setAllowFreeFormInput(true)
+      .build(),
+  )
+  RemoteInputIntentHelper.putRemoteInputsExtra(this, remoteInputs)
+  RemoteInputIntentHelper.putTitleExtra(this, "Search")
+  RemoteInputIntentHelper.putCancelLabelExtra(this, "Cancel")
+  RemoteInputIntentHelper.putConfirmLabelExtra(this, "Search")
+  RemoteInputIntentHelper.putInProgressLabelExtra(this, "Searching...")
 }

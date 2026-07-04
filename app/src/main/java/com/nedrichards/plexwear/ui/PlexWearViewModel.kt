@@ -40,9 +40,11 @@ data class PlexWearUiState(
   val loading: Boolean = true,
   val error: String? = null,
   val auth: PlexAuthUiState = PlexAuthUiState(),
+  val searchQuery: String = "",
   val screen: Screen = Screen.Home,
 ) {
   val configured: Boolean = credentials.isConfigured
+  val searching: Boolean = searchQuery.isNotBlank()
 }
 
 enum class Screen {
@@ -76,7 +78,9 @@ class PlexWearViewModel(
 
   fun loadHome() {
     withCredentials { credentials ->
-      _uiState.update { it.copy(screen = Screen.Home, title = "Plex Wear", loading = true, error = null) }
+      _uiState.update {
+        it.copy(screen = Screen.Home, title = "Plex Wear", loading = true, error = null, searchQuery = "")
+      }
       val libraries = repository.musicLibraries(credentials).map(BrowseItem::LibraryItem)
       val recent = repository.recentMusic(credentials).take(6)
       _uiState.update {
@@ -92,7 +96,9 @@ class PlexWearViewModel(
 
   fun loadAlbums(library: PlexLibrary) {
     withCredentials { credentials ->
-      _uiState.update { it.copy(screen = Screen.Albums, title = library.title, loading = true, error = null) }
+      _uiState.update {
+        it.copy(screen = Screen.Albums, title = library.title, loading = true, error = null, searchQuery = "")
+      }
       val albums = repository.albums(credentials, library).map(BrowseItem::AlbumItem)
       _uiState.update { it.copy(items = albums, tracks = emptyList(), loading = false) }
     }
@@ -100,7 +106,9 @@ class PlexWearViewModel(
 
   fun loadPlaylists() {
     withCredentials { credentials ->
-      _uiState.update { it.copy(screen = Screen.Playlists, title = "Playlists", loading = true, error = null) }
+      _uiState.update {
+        it.copy(screen = Screen.Playlists, title = "Playlists", loading = true, error = null, searchQuery = "")
+      }
       val playlists = repository.playlists(credentials).map(BrowseItem::PlaylistItem)
       _uiState.update { it.copy(items = playlists, tracks = emptyList(), loading = false) }
     }
@@ -108,7 +116,9 @@ class PlexWearViewModel(
 
   fun loadAlbumTracks(album: PlexAlbum) {
     withCredentials { credentials ->
-      _uiState.update { it.copy(screen = Screen.Tracks, title = album.title, loading = true, error = null) }
+      _uiState.update {
+        it.copy(screen = Screen.Tracks, title = album.title, loading = true, error = null, searchQuery = "")
+      }
       val tracks = repository.tracksForAlbum(credentials, album)
       _uiState.update { it.copy(items = emptyList(), tracks = tracks, loading = false) }
     }
@@ -116,7 +126,9 @@ class PlexWearViewModel(
 
   fun loadPlaylistTracks(playlist: PlexPlaylist) {
     withCredentials { credentials ->
-      _uiState.update { it.copy(screen = Screen.Tracks, title = playlist.title, loading = true, error = null) }
+      _uiState.update {
+        it.copy(screen = Screen.Tracks, title = playlist.title, loading = true, error = null, searchQuery = "")
+      }
       val tracks = repository.tracksForPlaylist(credentials, playlist)
       _uiState.update { it.copy(items = emptyList(), tracks = tracks, loading = false) }
     }
@@ -125,12 +137,20 @@ class PlexWearViewModel(
   fun play(track: PlexTrack) {
     withCredentials { credentials ->
       playbackController.play(PlexMediaItems.playbackPlan(credentials, track))
-      _uiState.update { it.copy(screen = Screen.NowPlaying, nowPlaying = track, error = null) }
+      _uiState.update { it.copy(screen = Screen.NowPlaying, nowPlaying = track, error = null, searchQuery = "") }
     }
   }
 
   fun openSettings() {
-    _uiState.update { it.copy(screen = Screen.Settings, title = "Settings", loading = false, error = null) }
+    _uiState.update { it.copy(screen = Screen.Settings, title = "Settings", loading = false, error = null, searchQuery = "") }
+  }
+
+  fun setSearchQuery(query: String) {
+    _uiState.update { it.copy(searchQuery = query.trim(), error = null) }
+  }
+
+  fun clearSearchQuery() {
+    _uiState.update { it.copy(searchQuery = "") }
   }
 
   fun startPinAuth() {
@@ -228,6 +248,7 @@ class PlexWearViewModel(
           loading = false,
           error = null,
           auth = PlexAuthUiState(),
+          searchQuery = "",
         )
       }
       if (credentials.isConfigured) loadHome()
