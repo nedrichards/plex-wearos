@@ -1,6 +1,7 @@
 package com.nedrichards.plexwear.ui
 
 import android.app.RemoteInput
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.scrollBy
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,8 +24,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -181,13 +191,23 @@ private fun HomeContent(
   onPlaylists: () -> Unit,
   onSettings: () -> Unit,
 ) {
-  AppButton(text = "Playlists", onClick = onPlaylists)
+  NavigationRow(
+    title = "Playlists",
+    subtitle = "Saved playlists",
+    icon = RowIcon.Playlist,
+    onClick = onPlaylists,
+  )
   state.items.forEach { item -> BrowseRow(state.credentials, item, onItemClick) }
   if (state.tracks.isNotEmpty()) {
     SectionLabel("Recent")
     state.tracks.forEach { track -> TrackRow(state.credentials, track, onPlay) }
   }
-  AppButton(text = "Settings", onClick = onSettings)
+  NavigationRow(
+    title = "Settings",
+    subtitle = "Account and server",
+    icon = RowIcon.Settings,
+    onClick = onSettings,
+  )
 }
 
 @Composable
@@ -315,30 +335,12 @@ private fun SettingsContent(
 
 @Composable
 private fun BrowseRow(credentials: PlexCredentials, item: BrowseItem, onClick: (BrowseItem) -> Unit) {
-  val title = when (item) {
-    is BrowseItem.LibraryItem -> item.library.title
-    is BrowseItem.AlbumItem -> item.album.title
-    is BrowseItem.PlaylistItem -> item.playlist.title
-    is BrowseItem.TrackItem -> item.track.title
-  }
-  val subtitle = when (item) {
-    is BrowseItem.LibraryItem -> item.library.type
-    is BrowseItem.AlbumItem -> item.album.artist
-    is BrowseItem.PlaylistItem -> item.playlist.durationMs?.formatDuration()
-    is BrowseItem.TrackItem -> item.track.artist
-  }
-  val artworkPath = when (item) {
-    is BrowseItem.LibraryItem -> null
-    is BrowseItem.AlbumItem -> item.album.thumb
-    is BrowseItem.PlaylistItem -> item.playlist.thumb
-    is BrowseItem.TrackItem -> item.track.thumb
-  }
-
   AppRow(
     credentials = credentials,
-    title = title,
-    subtitle = subtitle,
-    artworkPath = artworkPath,
+    title = item.browseRowTitle(),
+    subtitle = item.browseRowSubtitle(),
+    artworkPath = item.browseRowArtworkPath(),
+    fallbackIcon = item.browseRowIcon(),
     onClick = { onClick(item) },
   )
 }
@@ -350,6 +352,7 @@ private fun TrackRow(credentials: PlexCredentials, track: PlexTrack, onPlay: (Pl
     title = track.title,
     subtitle = listOfNotNull(track.artist, track.durationMs?.formatDuration()).joinToString(" - ").ifBlank { null },
     artworkPath = track.thumb,
+    fallbackIcon = RowIcon.Track,
     onClick = { onPlay(track) },
   )
 }
@@ -360,6 +363,7 @@ private fun AppRow(
   title: String,
   subtitle: String?,
   artworkPath: String?,
+  fallbackIcon: RowIcon,
   onClick: () -> Unit,
 ) {
   Button(
@@ -372,11 +376,15 @@ private fun AppRow(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      PlexArtwork(
-        credentials = credentials,
-        thumbPath = artworkPath,
-        contentDescription = null,
-      )
+      if (artworkPath == null) {
+        IconBadge(icon = fallbackIcon)
+      } else {
+        PlexArtwork(
+          credentials = credentials,
+          thumbPath = artworkPath,
+          contentDescription = null,
+        )
+      }
       Column(Modifier.weight(1f)) {
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
         subtitle?.let {
@@ -387,6 +395,50 @@ private fun AppRow(
             overflow = TextOverflow.Ellipsis,
           )
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun NavigationRow(
+  title: String,
+  subtitle: String,
+  icon: RowIcon,
+  onClick: () -> Unit,
+) {
+  AppRow(
+    credentials = PlexCredentials("", ""),
+    title = title,
+    subtitle = subtitle,
+    artworkPath = null,
+    fallbackIcon = icon,
+    onClick = onClick,
+  )
+}
+
+@Composable
+private fun IconBadge(
+  icon: RowIcon,
+  modifier: Modifier = Modifier,
+) {
+  val background = MaterialTheme.colorScheme.secondaryContainer
+  val foreground = MaterialTheme.colorScheme.onSecondaryContainer
+
+  Box(
+    modifier = modifier
+      .size(24.dp)
+      .clip(CircleShape)
+      .background(background),
+    contentAlignment = Alignment.Center,
+  ) {
+    Canvas(Modifier.size(16.dp)) {
+      when (icon) {
+        RowIcon.Album -> drawAlbumIcon(foreground)
+        RowIcon.Library -> drawLibraryIcon(foreground)
+        RowIcon.Playlist -> drawPlaylistIcon(foreground)
+        RowIcon.Settings -> drawSettingsIcon(foreground)
+        RowIcon.Track -> drawTrackIcon(foreground)
       }
     }
   }
@@ -425,6 +477,144 @@ private fun SectionLabel(text: String) {
     style = MaterialTheme.typography.labelMedium,
     maxLines = 1,
     overflow = TextOverflow.Ellipsis,
+  )
+}
+
+internal fun BrowseItem.browseRowTitle(): String = when (this) {
+  is BrowseItem.LibraryItem -> library.title
+  is BrowseItem.AlbumItem -> album.title
+  is BrowseItem.PlaylistItem -> playlist.title
+  is BrowseItem.TrackItem -> track.title
+}
+
+internal fun BrowseItem.browseRowSubtitle(): String? = when (this) {
+  is BrowseItem.LibraryItem -> "Browse albums"
+  is BrowseItem.AlbumItem -> album.artist
+  is BrowseItem.PlaylistItem -> playlist.durationMs?.formatDuration()
+  is BrowseItem.TrackItem -> track.artist
+}
+
+private fun BrowseItem.browseRowArtworkPath(): String? = when (this) {
+  is BrowseItem.LibraryItem -> null
+  is BrowseItem.AlbumItem -> album.thumb
+  is BrowseItem.PlaylistItem -> playlist.thumb
+  is BrowseItem.TrackItem -> track.thumb
+}
+
+private fun BrowseItem.browseRowIcon(): RowIcon = when (this) {
+  is BrowseItem.LibraryItem -> RowIcon.Library
+  is BrowseItem.AlbumItem -> RowIcon.Album
+  is BrowseItem.PlaylistItem -> RowIcon.Playlist
+  is BrowseItem.TrackItem -> RowIcon.Track
+}
+
+private enum class RowIcon {
+  Album,
+  Library,
+  Playlist,
+  Settings,
+  Track,
+}
+
+private fun DrawScope.drawAlbumIcon(color: Color) {
+  val stroke = Stroke(width = size.minDimension * 0.1f, cap = StrokeCap.Round)
+  drawCircle(
+    color = color,
+    radius = size.minDimension * 0.34f,
+    center = center,
+    style = stroke,
+  )
+  drawCircle(
+    color = color,
+    radius = size.minDimension * 0.08f,
+    center = center,
+  )
+}
+
+private fun DrawScope.drawLibraryIcon(color: Color) {
+  val stroke = Stroke(width = size.minDimension * 0.1f, cap = StrokeCap.Round)
+  drawRoundRect(
+    color = color,
+    topLeft = Offset(size.width * 0.2f, size.height * 0.17f),
+    size = Size(size.width * 0.6f, size.height * 0.66f),
+    cornerRadius = CornerRadius(size.minDimension * 0.08f),
+    style = stroke,
+  )
+  drawCircle(
+    color = color,
+    radius = size.minDimension * 0.13f,
+    center = Offset(size.width * 0.5f, size.height * 0.5f),
+    style = stroke,
+  )
+}
+
+private fun DrawScope.drawPlaylistIcon(color: Color) {
+  val stroke = Stroke(width = size.minDimension * 0.1f, cap = StrokeCap.Round)
+  listOf(0.3f, 0.5f, 0.7f).forEach { y ->
+    drawCircle(
+      color = color,
+      radius = size.minDimension * 0.04f,
+      center = Offset(size.width * 0.23f, size.height * y),
+    )
+    drawLine(
+      color = color,
+      start = Offset(size.width * 0.38f, size.height * y),
+      end = Offset(size.width * 0.78f, size.height * y),
+      strokeWidth = stroke.width,
+      cap = StrokeCap.Round,
+    )
+  }
+}
+
+private fun DrawScope.drawSettingsIcon(color: Color) {
+  val stroke = Stroke(width = size.minDimension * 0.1f, cap = StrokeCap.Round)
+  drawCircle(
+    color = color,
+    radius = size.minDimension * 0.22f,
+    center = center,
+    style = stroke,
+  )
+  for (i in 0 until 8) {
+    val angle = Math.toRadians((i * 45).toDouble())
+    val inner = size.minDimension * 0.33f
+    val outer = size.minDimension * 0.43f
+    drawLine(
+      color = color,
+      start = Offset(
+        x = center.x + kotlin.math.cos(angle).toFloat() * inner,
+        y = center.y + kotlin.math.sin(angle).toFloat() * inner,
+      ),
+      end = Offset(
+        x = center.x + kotlin.math.cos(angle).toFloat() * outer,
+        y = center.y + kotlin.math.sin(angle).toFloat() * outer,
+      ),
+      strokeWidth = stroke.width,
+      cap = StrokeCap.Round,
+    )
+  }
+}
+
+private fun DrawScope.drawTrackIcon(color: Color) {
+  val strokeWidth = size.minDimension * 0.1f
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.62f, size.height * 0.2f),
+    end = Offset(size.width * 0.62f, size.height * 0.68f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.62f, size.height * 0.2f),
+    end = Offset(size.width * 0.8f, size.height * 0.28f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+  drawCircle(
+    color = color,
+    radius = size.minDimension * 0.14f,
+    center = Offset(size.width * 0.42f, size.height * 0.7f),
+    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
   )
 }
 

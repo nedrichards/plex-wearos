@@ -1,11 +1,22 @@
 package com.nedrichards.plexwear.ui
 
+import com.nedrichards.plexwear.data.BrowseItem
+import com.nedrichards.plexwear.data.PlexLibrary
 import com.nedrichards.plexwear.data.PlexTrack
+import junit.framework.TestCase.assertEquals
 import junit.framework.TestCase.assertFalse
 import junit.framework.TestCase.assertTrue
 import org.junit.Test
 
 class PlexWearUiStateTest {
+  @Test
+  fun browseRowSubtitle_describesLibraryNavigationInsteadOfPlexType() {
+    val item = BrowseItem.LibraryItem(PlexLibrary("1", "Music", "artist"))
+
+    assertEquals("Music", item.browseRowTitle())
+    assertEquals("Browse albums", item.browseRowSubtitle())
+  }
+
   @Test
   fun canOpenCurrentPlayback_requiresNowPlayingTrack() {
     assertFalse(PlexWearUiState(screen = Screen.Home).canOpenCurrentPlayback)
