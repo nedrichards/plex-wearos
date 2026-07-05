@@ -89,16 +89,22 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
             is BrowseItem.LibraryItem -> viewModel.loadAlbums(item.library)
             is BrowseItem.AlbumItem -> viewModel.loadAlbumTracks(item.album)
             is BrowseItem.PlaylistItem -> viewModel.loadPlaylistTracks(item.playlist)
-            is BrowseItem.TrackItem -> viewModel.play(item.track)
+            is BrowseItem.TrackItem -> viewModel.openTrack(item.track)
           }
         },
+        onSelectTrack = viewModel::openTrack,
+        onTrackList = viewModel::openTrackList,
         onPlay = { viewModel.play(it) },
         onPlayAll = { viewModel.playAll(it) },
+        onDownloadTrack = viewModel::downloadTrack,
+        onDownloadTracks = viewModel::downloadTracks,
         onCurrentPlayback = viewModel::openCurrentPlayback,
         onTogglePlayback = viewModel::togglePlayback,
         onPrevious = viewModel::skipToPrevious,
         onNext = viewModel::skipToNext,
         onPlaylists = viewModel::loadPlaylists,
+        onCycleOfflineQuality = viewModel::cycleOfflineQuality,
+        onClearOfflineCache = viewModel::clearOfflineCache,
       )
     }
   }
@@ -115,13 +121,19 @@ private fun PlexWearScreen(
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
   onItemClick: (BrowseItem) -> Unit,
+  onSelectTrack: (PlexTrack) -> Unit,
+  onTrackList: () -> Unit,
   onPlay: (PlexTrack) -> Unit,
   onPlayAll: (List<PlexTrack>) -> Unit,
+  onDownloadTrack: (PlexTrack) -> Unit,
+  onDownloadTracks: (List<PlexTrack>) -> Unit,
   onCurrentPlayback: () -> Unit,
   onTogglePlayback: () -> Unit,
   onPrevious: () -> Unit,
   onNext: () -> Unit,
   onPlaylists: () -> Unit,
+  onCycleOfflineQuality: () -> Unit,
+  onClearOfflineCache: () -> Unit,
 ) {
   val scrollState = rememberScrollState()
   val focusRequester = FocusRequester()
@@ -176,9 +188,18 @@ private fun PlexWearScreen(
     when (state.screen) {
       Screen.Home -> HomeContent(state, onItemClick, onPlay, onPlaylists, onSettings)
       Screen.Albums, Screen.Playlists -> BrowseContent(state, onItemClick, onHome, onSearch, onClearSearch)
-      Screen.Tracks -> TracksContent(state, onPlay, onPlayAll, onHome, onSearch, onClearSearch)
+      Screen.Tracks -> TracksContent(
+        state,
+        onSelectTrack,
+        onPlayAll,
+        onDownloadTracks,
+        onHome,
+        onSearch,
+        onClearSearch,
+      )
+      Screen.Track -> TrackContent(state, onPlay, onDownloadTrack, onTrackList, onHome)
       Screen.NowPlaying -> NowPlayingContent(state, onTogglePlayback, onPrevious, onNext, onHome)
-      Screen.Settings -> SettingsContent(state, onHome, onReset)
+      Screen.Settings -> SettingsContent(state, onHome, onReset, onCycleOfflineQuality, onClearOfflineCache)
     }
   }
 }
@@ -253,8 +274,9 @@ private fun BrowseContent(
 @Composable
 private fun TracksContent(
   state: PlexWearUiState,
-  onPlay: (PlexTrack) -> Unit,
+  onSelectTrack: (PlexTrack) -> Unit,
   onPlayAll: (List<PlexTrack>) -> Unit,
+  onDownloadTracks: (List<PlexTrack>) -> Unit,
   onHome: () -> Unit,
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
@@ -263,7 +285,44 @@ private fun TracksContent(
   SearchControls(state.searchQuery, onSearch, onClearSearch)
   if (tracks.isEmpty()) StatusText(if (state.searching) "No matches." else "No tracks found.")
   if (tracks.isNotEmpty()) AppButton(text = "Play all", onClick = { onPlayAll(tracks) })
-  tracks.forEach { track -> TrackRow(state.credentials, track, onPlay) }
+  if (state.tracks.isNotEmpty()) {
+    AppButton(text = "Download all", onClick = { onDownloadTracks(state.tracks) })
+  }
+  tracks.forEach { track ->
+    TrackRow(
+      credentials = state.credentials,
+      track = track,
+      onPlay = onSelectTrack,
+      offlineStatus = state.offlineStatus(track),
+    )
+  }
+  AppButton(text = "Home", onClick = onHome)
+}
+
+@Composable
+private fun TrackContent(
+  state: PlexWearUiState,
+  onPlay: (PlexTrack) -> Unit,
+  onDownloadTrack: (PlexTrack) -> Unit,
+  onTrackList: () -> Unit,
+  onHome: () -> Unit,
+) {
+  val track = state.selectedTrack
+  if (track == null) {
+    StatusText("No track selected.")
+    AppButton(text = "Tracks", onClick = onTrackList)
+    return
+  }
+
+  track.artist?.let { StatusText(it) }
+  track.album?.let { StatusText(it) }
+  track.durationMs?.let { StatusText(it.formatDuration()) }
+  state.offlineStatus(track)?.let { StatusText(it) }
+  AppButton(text = "Play", onClick = { onPlay(track) })
+  if (state.downloadedQuality(track) == null && !state.isDownloading(track)) {
+    AppButton(text = "Download ${state.offlineQuality.bitrateKbps}k", onClick = { onDownloadTrack(track) })
+  }
+  AppButton(text = "Tracks", onClick = onTrackList)
   AppButton(text = "Home", onClick = onHome)
 }
 
@@ -324,8 +383,13 @@ private fun SettingsContent(
   state: PlexWearUiState,
   onHome: () -> Unit,
   onReset: () -> Unit,
+  onCycleOfflineQuality: () -> Unit,
+  onClearOfflineCache: () -> Unit,
 ) {
   StatusText(if (state.configured) "Credentials are stored on this watch." else "No credentials stored.")
+  StatusText("Downloads: ${state.offlineCacheBytes.formatBytes()}")
+  AppButton(text = "Quality: ${state.offlineQuality.summary}", onClick = onCycleOfflineQuality)
+  AppButton(text = "Clear downloads", onClick = onClearOfflineCache, enabled = state.offlineCacheBytes > 0)
   if (BuildConfig.DEBUG) {
     StatusText("Debug builds still seed plex.serverUrl and plex.token when local.properties is set.")
   }
@@ -346,11 +410,18 @@ private fun BrowseRow(credentials: PlexCredentials, item: BrowseItem, onClick: (
 }
 
 @Composable
-private fun TrackRow(credentials: PlexCredentials, track: PlexTrack, onPlay: (PlexTrack) -> Unit) {
+private fun TrackRow(
+  credentials: PlexCredentials,
+  track: PlexTrack,
+  onPlay: (PlexTrack) -> Unit,
+  offlineStatus: String? = null,
+) {
   AppRow(
     credentials = credentials,
     title = track.title,
-    subtitle = listOfNotNull(track.artist, track.durationMs?.formatDuration()).joinToString(" - ").ifBlank { null },
+    subtitle = listOfNotNull(track.artist, track.durationMs?.formatDuration(), offlineStatus)
+      .joinToString(" - ")
+      .ifBlank { null },
     artworkPath = track.thumb,
     fallbackIcon = RowIcon.Track,
     onClick = { onPlay(track) },
@@ -468,6 +539,18 @@ private fun StatusText(text: String) {
     maxLines = 3,
     overflow = TextOverflow.Ellipsis,
   )
+}
+
+private fun PlexWearUiState.offlineStatus(track: PlexTrack): String? = when {
+  isDownloading(track) -> "Downloading"
+  downloadedQuality(track) != null -> "Downloaded ${downloadedQuality(track)?.bitrateKbps}k"
+  else -> null
+}
+
+private fun Long.formatBytes(): String = when {
+  this <= 0L -> "0 MB"
+  this < 1024L * 1024L -> "${(this / 1024L).coerceAtLeast(1L)} KB"
+  else -> "${this / (1024L * 1024L)} MB"
 }
 
 @Composable

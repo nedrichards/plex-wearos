@@ -6,6 +6,7 @@ import androidx.media3.common.MediaMetadata
 import com.nedrichards.plexwear.auth.PlexCredentials
 import com.nedrichards.plexwear.data.PlexRequestBuilder
 import com.nedrichards.plexwear.data.PlexTrack
+import com.nedrichards.plexwear.offline.OfflineQuality
 import java.net.URI
 
 data class PlexMediaItemSpec(
@@ -28,17 +29,34 @@ data class PlexPlaybackPlanSpec(
 )
 
 object PlexMediaItems {
-  fun playbackPlan(credentials: PlexCredentials, track: PlexTrack): PlexPlaybackPlan =
-    playbackPlanSpec(credentials, track).let { spec ->
+  fun playbackPlan(
+    credentials: PlexCredentials,
+    track: PlexTrack,
+    quality: OfflineQuality = OfflineQuality.Default,
+    cachedUri: String? = null,
+  ): PlexPlaybackPlan =
+    playbackPlanSpec(credentials, track, quality, cachedUri).let { spec ->
       PlexPlaybackPlan(
         primary = mediaItem(spec.primary),
         fallback = spec.fallback?.let(::mediaItem),
       )
     }
 
-  fun playbackPlanSpec(credentials: PlexCredentials, track: PlexTrack): PlexPlaybackPlanSpec {
+  fun playbackPlanSpec(
+    credentials: PlexCredentials,
+    track: PlexTrack,
+    quality: OfflineQuality = OfflineQuality.Default,
+    cachedUri: String? = null,
+  ): PlexPlaybackPlanSpec {
+    if (cachedUri != null) {
+      return PlexPlaybackPlanSpec(
+        primary = mediaItemSpec(track, cachedUri),
+        fallback = streamingSpec(credentials, track, quality),
+      )
+    }
+
     val direct = directSpec(credentials, track)
-    val transcode = transcodeSpec(credentials, track)
+    val transcode = transcodeSpec(credentials, track, quality)
 
     return when {
       track.prefersDirectPlay(credentials) -> PlexPlaybackPlanSpec(primary = direct, fallback = transcode)
@@ -49,14 +67,31 @@ object PlexMediaItems {
   fun direct(credentials: PlexCredentials, track: PlexTrack): MediaItem =
     mediaItem(directSpec(credentials, track))
 
-  fun transcode(credentials: PlexCredentials, track: PlexTrack): MediaItem =
-    mediaItem(transcodeSpec(credentials, track))
+  fun transcode(
+    credentials: PlexCredentials,
+    track: PlexTrack,
+    quality: OfflineQuality = OfflineQuality.Default,
+  ): MediaItem =
+    mediaItem(transcodeSpec(credentials, track, quality))
 
   fun directSpec(credentials: PlexCredentials, track: PlexTrack): PlexMediaItemSpec =
     mediaItemSpec(track, PlexRequestBuilder.streamingUrl(credentials, track))
 
-  fun transcodeSpec(credentials: PlexCredentials, track: PlexTrack): PlexMediaItemSpec =
-    mediaItemSpec(track, PlexRequestBuilder.transcodeUrl(credentials, track))
+  fun transcodeSpec(
+    credentials: PlexCredentials,
+    track: PlexTrack,
+    quality: OfflineQuality = OfflineQuality.Default,
+  ): PlexMediaItemSpec =
+    mediaItemSpec(track, PlexRequestBuilder.transcodeUrl(credentials, track, quality.bitrateKbps))
+
+  private fun streamingSpec(
+    credentials: PlexCredentials,
+    track: PlexTrack,
+    quality: OfflineQuality,
+  ): PlexMediaItemSpec {
+    val remotePlan = playbackPlanSpec(credentials, track, quality)
+    return remotePlan.primary
+  }
 
   private fun mediaItemSpec(track: PlexTrack, url: String): PlexMediaItemSpec =
     PlexMediaItemSpec(

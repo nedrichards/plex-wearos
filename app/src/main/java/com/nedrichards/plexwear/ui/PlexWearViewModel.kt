@@ -12,6 +12,9 @@ import com.nedrichards.plexwear.data.PlexLibrary
 import com.nedrichards.plexwear.data.PlexPlaylist
 import com.nedrichards.plexwear.data.PlexRepository
 import com.nedrichards.plexwear.data.PlexTrack
+import com.nedrichards.plexwear.offline.OfflineCacheManager
+import com.nedrichards.plexwear.offline.OfflineQuality
+import com.nedrichards.plexwear.offline.OfflineSettingsStore
 import com.nedrichards.plexwear.playback.PlaybackController
 import com.nedrichards.plexwear.playback.PlexMediaItems
 import kotlinx.coroutines.CancellationException
@@ -36,6 +39,8 @@ data class PlexWearUiState(
   val title: String = "Plex Wear",
   val items: List<BrowseItem> = emptyList(),
   val tracks: List<PlexTrack> = emptyList(),
+  val trackListTitle: String? = null,
+  val selectedTrack: PlexTrack? = null,
   val nowPlaying: PlexTrack? = null,
   val nowPlayingContext: String? = null,
   val nowPlayingTrackCount: Int = 0,
@@ -46,6 +51,10 @@ data class PlexWearUiState(
   val error: String? = null,
   val auth: PlexAuthUiState = PlexAuthUiState(),
   val searchQuery: String = "",
+  val offlineQuality: OfflineQuality = OfflineQuality.Default,
+  val downloadedTrackQualities: Map<String, OfflineQuality> = emptyMap(),
+  val downloadingTrackIds: Set<String> = emptySet(),
+  val offlineCacheBytes: Long = 0,
   val screen: Screen = Screen.Home,
 ) {
   val configured: Boolean = credentials.isConfigured
@@ -53,6 +62,8 @@ data class PlexWearUiState(
   val canOpenCurrentPlayback: Boolean = nowPlaying != null && screen != Screen.NowPlaying
   val canPlayPrevious: Boolean = nowPlayingIndex > 0
   val canPlayNext: Boolean = nowPlayingIndex >= 0 && nowPlayingIndex < nowPlayingQueue.lastIndex
+  fun downloadedQuality(track: PlexTrack): OfflineQuality? = downloadedTrackQualities[track.ratingKey]
+  fun isDownloading(track: PlexTrack): Boolean = track.ratingKey in downloadingTrackIds
 }
 
 enum class Screen {
@@ -60,6 +71,7 @@ enum class Screen {
   Albums,
   Playlists,
   Tracks,
+  Track,
   NowPlaying,
   Settings,
 }
@@ -67,6 +79,8 @@ enum class Screen {
 class PlexWearViewModel(
   application: Application,
   private val authStore: PlexAuthStore,
+  private val offlineSettingsStore: OfflineSettingsStore,
+  private val offlineCacheManager: OfflineCacheManager,
   private val repository: PlexRepository,
   private val authClient: PlexAuthClient,
 ) : AndroidViewModel(application) {
@@ -76,6 +90,24 @@ class PlexWearViewModel(
   val uiState: StateFlow<PlexWearUiState> = _uiState.asStateFlow()
 
   init {
+    viewModelScope.launch {
+      offlineSettingsStore.quality.collect { quality ->
+        _uiState.update { it.copy(offlineQuality = quality) }
+      }
+    }
+    viewModelScope.launch {
+      offlineCacheManager.snapshot.collect { snapshot ->
+        _uiState.update {
+          it.copy(
+            downloadedTrackQualities = snapshot.entries
+              .groupBy { entry -> entry.ratingKey }
+              .mapValues { (_, entries) -> entries.maxBy { entry -> entry.quality.bitrateKbps }.quality },
+            downloadingTrackIds = snapshot.downloadingTrackIds,
+            offlineCacheBytes = snapshot.totalBytes,
+          )
+        }
+      }
+    }
     viewModelScope.launch {
       authStore.seedDebugCredentialsIfNeeded()
       val credentials = authStore.credentials.first()
@@ -87,7 +119,15 @@ class PlexWearViewModel(
   fun loadHome() {
     withCredentials { credentials ->
       _uiState.update {
-        it.copy(screen = Screen.Home, title = "Plex Wear", loading = true, error = null, searchQuery = "")
+        it.copy(
+          screen = Screen.Home,
+          title = "Plex Wear",
+          loading = true,
+          error = null,
+          searchQuery = "",
+          trackListTitle = null,
+          selectedTrack = null,
+        )
       }
       val libraries = repository.musicLibraries(credentials).map(BrowseItem::LibraryItem)
       val recent = repository.recentMusic(credentials).take(6)
@@ -105,7 +145,15 @@ class PlexWearViewModel(
   fun loadAlbums(library: PlexLibrary) {
     withCredentials { credentials ->
       _uiState.update {
-        it.copy(screen = Screen.Albums, title = library.title, loading = true, error = null, searchQuery = "")
+        it.copy(
+          screen = Screen.Albums,
+          title = library.title,
+          loading = true,
+          error = null,
+          searchQuery = "",
+          trackListTitle = null,
+          selectedTrack = null,
+        )
       }
       val albums = repository.albums(credentials, library).map(BrowseItem::AlbumItem)
       _uiState.update { it.copy(items = albums, tracks = emptyList(), loading = false) }
@@ -115,7 +163,15 @@ class PlexWearViewModel(
   fun loadPlaylists() {
     withCredentials { credentials ->
       _uiState.update {
-        it.copy(screen = Screen.Playlists, title = "Playlists", loading = true, error = null, searchQuery = "")
+        it.copy(
+          screen = Screen.Playlists,
+          title = "Playlists",
+          loading = true,
+          error = null,
+          searchQuery = "",
+          trackListTitle = null,
+          selectedTrack = null,
+        )
       }
       val playlists = repository.playlists(credentials).map(BrowseItem::PlaylistItem)
       _uiState.update { it.copy(items = playlists, tracks = emptyList(), loading = false) }
@@ -125,7 +181,15 @@ class PlexWearViewModel(
   fun loadAlbumTracks(album: PlexAlbum) {
     withCredentials { credentials ->
       _uiState.update {
-        it.copy(screen = Screen.Tracks, title = album.title, loading = true, error = null, searchQuery = "")
+        it.copy(
+          screen = Screen.Tracks,
+          title = album.title,
+          loading = true,
+          error = null,
+          searchQuery = "",
+          trackListTitle = album.title,
+          selectedTrack = null,
+        )
       }
       val tracks = repository.tracksForAlbum(credentials, album)
       _uiState.update { it.copy(items = emptyList(), tracks = tracks, loading = false) }
@@ -135,16 +199,60 @@ class PlexWearViewModel(
   fun loadPlaylistTracks(playlist: PlexPlaylist) {
     withCredentials { credentials ->
       _uiState.update {
-        it.copy(screen = Screen.Tracks, title = playlist.title, loading = true, error = null, searchQuery = "")
+        it.copy(
+          screen = Screen.Tracks,
+          title = playlist.title,
+          loading = true,
+          error = null,
+          searchQuery = "",
+          trackListTitle = playlist.title,
+          selectedTrack = null,
+        )
       }
       val tracks = repository.tracksForPlaylist(credentials, playlist)
       _uiState.update { it.copy(items = emptyList(), tracks = tracks, loading = false) }
     }
   }
 
+  fun openTrack(track: PlexTrack) {
+    _uiState.update {
+      it.copy(
+        screen = Screen.Track,
+        title = track.title,
+        selectedTrack = track,
+        error = null,
+        searchQuery = "",
+      )
+    }
+  }
+
+  fun openTrackList() {
+    _uiState.update {
+      if (it.tracks.isEmpty()) {
+        it
+      } else {
+        it.copy(
+          screen = Screen.Tracks,
+          title = it.trackListTitle ?: it.title,
+          selectedTrack = null,
+          error = null,
+        )
+      }
+    }
+  }
+
   fun play(track: PlexTrack) {
     withCredentials { credentials ->
-      playbackController.play(PlexMediaItems.playbackPlan(credentials, track))
+      val quality = _uiState.value.offlineQuality
+      playbackController.play(
+        PlexMediaItems.playbackPlan(
+          credentials = credentials,
+          track = track,
+          quality = quality,
+          cachedUri = offlineCacheManager.cachedUri(track, quality),
+        ),
+      )
+      autoCacheTracks(credentials, listOf(track), quality)
       _uiState.update {
         it.copy(
           screen = Screen.NowPlaying,
@@ -154,6 +262,7 @@ class PlexWearViewModel(
           nowPlayingTrackCount = 1,
           nowPlayingQueue = listOf(track),
           nowPlayingIndex = 0,
+          selectedTrack = null,
           playbackPaused = false,
           error = null,
           searchQuery = "",
@@ -165,7 +274,18 @@ class PlexWearViewModel(
   fun playAll(tracks: List<PlexTrack>) {
     if (tracks.isEmpty()) return
     withCredentials { credentials ->
-      playbackController.play(tracks.map { PlexMediaItems.playbackPlan(credentials, it) })
+      val quality = _uiState.value.offlineQuality
+      playbackController.play(
+        tracks.map { track ->
+          PlexMediaItems.playbackPlan(
+            credentials = credentials,
+            track = track,
+            quality = quality,
+            cachedUri = offlineCacheManager.cachedUri(track, quality),
+          )
+        },
+      )
+      autoCacheTracks(credentials, tracks, quality)
       _uiState.update {
         it.copy(
           screen = Screen.NowPlaying,
@@ -175,6 +295,7 @@ class PlexWearViewModel(
           nowPlayingTrackCount = tracks.size,
           nowPlayingQueue = tracks,
           nowPlayingIndex = 0,
+          selectedTrack = null,
           playbackPaused = false,
           error = null,
           searchQuery = "",
@@ -251,8 +372,53 @@ class PlexWearViewModel(
     }
   }
 
+  fun downloadTrack(track: PlexTrack) {
+    downloadTracks(listOf(track))
+  }
+
+  fun downloadTracks(tracks: List<PlexTrack>) {
+    if (tracks.isEmpty()) return
+    withCredentials { credentials ->
+      val quality = _uiState.value.offlineQuality
+      runCatching {
+        tracks.forEach { track -> offlineCacheManager.downloadTrack(credentials, track, quality) }
+      }.onSuccess {
+        _uiState.update { it.copy(error = null) }
+      }.onFailure { throwable ->
+        _uiState.update { it.copy(error = throwable.message ?: "Download failed") }
+      }
+    }
+  }
+
+  fun cycleOfflineQuality() {
+    viewModelScope.launch {
+      offlineSettingsStore.setQuality(_uiState.value.offlineQuality.next())
+    }
+  }
+
+  fun clearOfflineCache() {
+    viewModelScope.launch {
+      runCatching {
+        offlineCacheManager.clear()
+      }.onSuccess {
+        _uiState.update { it.copy(error = null) }
+      }.onFailure { throwable ->
+        _uiState.update { it.copy(error = throwable.message ?: "Could not clear downloads") }
+      }
+    }
+  }
+
   fun openSettings() {
-    _uiState.update { it.copy(screen = Screen.Settings, title = "Settings", loading = false, error = null, searchQuery = "") }
+    _uiState.update {
+      it.copy(
+        screen = Screen.Settings,
+        title = "Settings",
+        loading = false,
+        error = null,
+        searchQuery = "",
+        selectedTrack = null,
+      )
+    }
   }
 
   fun setSearchQuery(query: String) {
@@ -354,6 +520,8 @@ class PlexWearViewModel(
           title = "Plex Wear",
           items = emptyList(),
           tracks = emptyList(),
+          trackListTitle = null,
+          selectedTrack = null,
           nowPlaying = null,
           nowPlayingContext = null,
           nowPlayingTrackCount = 0,
@@ -396,6 +564,18 @@ class PlexWearViewModel(
         block(credentials)
       }.onFailure { throwable ->
         _uiState.update { it.copy(loading = false, error = throwable.message ?: "Plex request failed") }
+      }
+    }
+  }
+
+  private fun autoCacheTracks(
+    credentials: PlexCredentials,
+    tracks: List<PlexTrack>,
+    quality: OfflineQuality,
+  ) {
+    viewModelScope.launch {
+      runCatching {
+        tracks.forEach { track -> offlineCacheManager.downloadTrack(credentials, track, quality) }
       }
     }
   }

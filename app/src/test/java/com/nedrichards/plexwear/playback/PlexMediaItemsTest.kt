@@ -2,6 +2,7 @@ package com.nedrichards.plexwear.playback
 
 import com.nedrichards.plexwear.auth.PlexCredentials
 import com.nedrichards.plexwear.data.PlexTrack
+import com.nedrichards.plexwear.offline.OfflineQuality
 import junit.framework.TestCase.assertEquals
 import junit.framework.TestCase.assertNotNull
 import org.junit.Test
@@ -61,6 +62,29 @@ class PlexMediaItemsTest {
 
     assertEquals("https://plex.example.test/music/:/transcode/universal/start", plan.primary.uri.substringBefore("?"))
     assertEquals("https://plex.example.test/library/parts/42/file.flac?X-Plex-Token=token", plan.fallback?.uri)
+  }
+
+  @Test
+  fun playbackPlan_usesSelectedTranscodeQuality() {
+    val plan = PlexMediaItems.playbackPlanSpec(
+      credentials = PlexCredentials("https://plex.example.test", "token"),
+      track = track(audioCodec = "flac", partKey = "/library/parts/42/file.flac"),
+      quality = OfflineQuality.DataSaver,
+    )
+
+    assertEquals("96", plan.primary.uri.substringAfter("audioBitrate=").substringBefore("&"))
+  }
+
+  @Test
+  fun playbackPlan_prefersCachedFileWithRemoteFallback() {
+    val plan = PlexMediaItems.playbackPlanSpec(
+      credentials = PlexCredentials("https://plex.example.test", "token"),
+      track = track(audioCodec = "flac", partKey = "/library/parts/42/file.flac"),
+      cachedUri = "file:///data/user/0/com.nedrichards.plexwear/files/offline-media/track.aac",
+    )
+
+    assertEquals("file:///data/user/0/com.nedrichards.plexwear/files/offline-media/track.aac", plan.primary.uri)
+    assertEquals("https://plex.example.test/music/:/transcode/universal/start", plan.fallback?.uri?.substringBefore("?"))
   }
 
   @Test

@@ -28,7 +28,22 @@ Release builds set the generated Plex `BuildConfig` fields to empty strings.
 
 ## Playback
 
-Playback is automatic from a single track tap. The app direct plays MP3 and AAC, direct plays FLAC when the configured Plex server URL looks local/private and otherwise uses Plex's HTTP AAC transcode endpoint for FLAC to avoid high-bandwidth remote streaming. If the first playback path fails during startup, the app silently falls back to the other path.
+Selecting a track from an album or playlist opens track actions for playback and download. The app direct plays MP3 and AAC, direct plays FLAC when the configured Plex server URL looks local/private and otherwise uses Plex's HTTP AAC transcode endpoint for FLAC to avoid high-bandwidth remote streaming. If the first playback path fails during startup, the app silently falls back to the other path.
+
+## Offline playback
+
+`Download all` stores the whole loaded album or playlist. Individual tracks can
+be downloaded from the selected track action screen.
+
+The app also automatically caches tracks after playback starts. Downloaded
+tracks are stored in the app's private storage on the watch, playback prefers a
+local copy when one exists, and Settings shows the total download size with a
+`Clear downloads` action.
+
+Settings also cycles the download/transcode quality between 96k, 192k, and
+320k AAC. The selected quality applies to new downloads, automatic caching, and
+Plex transcode streams. Existing downloads keep the quality they were cached at
+until they are cleared or replaced.
 
 ## Validation
 

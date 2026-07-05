@@ -20,7 +20,14 @@ class MainActivity : ComponentActivity() {
       val viewModel: PlexWearViewModel = viewModel(
         factory = viewModelFactory {
           initializer {
-            PlexWearViewModel(app, app.authStore, app.repository, app.authClient)
+            PlexWearViewModel(
+              app,
+              app.authStore,
+              app.offlineSettingsStore,
+              app.offlineCacheManager,
+              app.repository,
+              app.authClient,
+            )
           }
         },
       )

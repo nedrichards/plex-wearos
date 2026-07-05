@@ -37,7 +37,11 @@ object PlexRequestBuilder {
     return build(credentials, directKey).url
   }
 
-  fun transcodeUrl(credentials: PlexCredentials, track: PlexTrack): String = build(
+  fun transcodeUrl(
+    credentials: PlexCredentials,
+    track: PlexTrack,
+    audioBitrateKbps: Int = 192,
+  ): String = build(
     credentials = credentials,
     path = "/music/:/transcode/universal/start",
     query = clientHeaders + mapOf(
@@ -46,7 +50,7 @@ object PlexRequestBuilder {
       "directPlay" to "0",
       "directStream" to "0",
       "audioCodec" to "aac",
-      "audioBitrate" to "192",
+      "audioBitrate" to audioBitrateKbps.toString(),
       "maxAudioChannels" to "2",
       "X-Plex-Container-Start" to "0",
       "X-Plex-Container-Size" to "1",

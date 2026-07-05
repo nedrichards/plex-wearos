@@ -23,7 +23,7 @@ class PlexRequestBuilderTest {
   }
 
   @Test
-  fun transcodeUrl_requestsLowBitrateAacStream() {
+  fun transcodeUrl_requestsDefaultAacStream() {
     val track = PlexTrack(
       ratingKey = "1",
       key = "/library/metadata/1",
@@ -43,6 +43,24 @@ class PlexRequestBuilderTest {
     assertTrue(url.contains("audioBitrate=192"))
     assertTrue(url.contains("directPlay=0"))
     assertTrue(url.contains("X-Plex-Container-Size=1"))
+  }
+
+  @Test
+  fun transcodeUrl_usesRequestedBitrate() {
+    val track = PlexTrack(
+      ratingKey = "1",
+      key = "/library/metadata/1",
+      title = "Song",
+      album = null,
+      artist = null,
+      durationMs = null,
+      thumb = null,
+      partKey = null,
+    )
+
+    val url = PlexRequestBuilder.transcodeUrl(credentials, track, audioBitrateKbps = 96)
+
+    assertTrue(url.contains("audioBitrate=96"))
   }
 
   @Test
