@@ -55,16 +55,16 @@ until they are cleared or replaced.
 
 ## Validation
 
-Use a repo-local Gradle cache:
+From the repository root, use a repo-local Gradle cache. Set `JAVA_HOME`
+first if your shell does not already select an Android-compatible JDK.
 
 ```sh
-JAVA_HOME=/var/home/nedr/.jdks/jbr-17.0.14 \
-GRADLE_USER_HOME=/var/home/nedr/Projects/plex-wearos/.gradle-local \
+export GRADLE_USER_HOME="$PWD/.gradle-local"
 ./gradlew testDebugUnitTest assembleDebug assembleRelease
 ```
 
 Check the watch-only manifest gate:
 
 ```sh
-${ANDROID_HOME}/build-tools/36.0.0/aapt dump badging app/build/outputs/apk/debug/app-debug.apk
+"${ANDROID_HOME}/build-tools/36.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk
 ```
