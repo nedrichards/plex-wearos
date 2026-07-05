@@ -12,8 +12,20 @@ import kotlinx.coroutines.flow.map
 data class PlexCredentials(
   val serverUrl: String,
   val token: String,
+  val alternateServerUrls: List<String> = emptyList(),
 ) {
-  val isConfigured: Boolean = serverUrl.isNotBlank() && token.isNotBlank()
+  val serverUrls: List<String> =
+    (listOf(serverUrl) + alternateServerUrls)
+      .map { it.trim().trimEnd('/') }
+      .filter { it.isNotBlank() }
+      .distinct()
+  val isConfigured: Boolean = serverUrls.isNotEmpty() && token.isNotBlank()
+
+  fun forServerUrl(serverUrl: String): PlexCredentials =
+    copy(
+      serverUrl = serverUrl.trim().trimEnd('/'),
+      alternateServerUrls = serverUrls.filterNot { it == serverUrl.trim().trimEnd('/') },
+    )
 }
 
 private val Context.plexAuthDataStore by preferencesDataStore(name = "plex_auth")
@@ -25,6 +37,12 @@ class PlexAuthStore(context: Context) {
     PlexCredentials(
       serverUrl = preferences[SERVER_URL].orEmpty(),
       token = preferences[TOKEN].orEmpty(),
+      alternateServerUrls = preferences[ALTERNATE_SERVER_URLS]
+        .orEmpty()
+        .lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .toList(),
     )
   }
 
@@ -49,9 +67,19 @@ class PlexAuthStore(context: Context) {
   }
 
   suspend fun save(serverUrl: String, token: String) {
+    save(PlexCredentials(serverUrl, token))
+  }
+
+  suspend fun save(credentials: PlexCredentials) {
     dataStore.edit { preferences ->
-      preferences[SERVER_URL] = serverUrl.trim().trimEnd('/')
-      preferences[TOKEN] = token.trim()
+      preferences[SERVER_URL] = credentials.serverUrls.firstOrNull().orEmpty()
+      preferences[TOKEN] = credentials.token.trim()
+      val alternateServerUrls = credentials.serverUrls.drop(1)
+      if (alternateServerUrls.isEmpty()) {
+        preferences.remove(ALTERNATE_SERVER_URLS)
+      } else {
+        preferences[ALTERNATE_SERVER_URLS] = alternateServerUrls.joinToString("\n")
+      }
       preferences[DEBUG_SEEDED] = false
     }
   }
@@ -60,12 +88,14 @@ class PlexAuthStore(context: Context) {
     dataStore.edit { preferences ->
       preferences.remove(SERVER_URL)
       preferences.remove(TOKEN)
+      preferences.remove(ALTERNATE_SERVER_URLS)
       preferences.remove(DEBUG_SEEDED)
     }
   }
 
   companion object {
     private val SERVER_URL = stringPreferencesKey("server_url")
+    private val ALTERNATE_SERVER_URLS = stringPreferencesKey("alternate_server_urls")
     private val TOKEN = stringPreferencesKey("token")
     private val DEBUG_SEEDED = booleanPreferencesKey("debug_seeded")
   }

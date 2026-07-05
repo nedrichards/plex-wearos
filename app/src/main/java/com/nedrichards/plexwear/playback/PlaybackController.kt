@@ -23,8 +23,14 @@ class PlaybackController(private val context: Context) {
     if (plans.isEmpty()) return
     val mediaController = controller ?: connect().also { controller = it }
     val prepared = mediaController.prepareAndPlay(plans.map { it.primary })
-    if (!prepared && plans.any { it.fallback != null }) {
-      mediaController.prepareAndPlay(plans.map { it.fallback ?: it.primary })
+    if (!prepared) {
+      val maxFallbacks = plans.maxOf { it.fallbacks.size }
+      for (fallbackIndex in 0 until maxFallbacks) {
+        val fallbackPrepared = mediaController.prepareAndPlay(
+          plans.map { it.fallbacks.getOrNull(fallbackIndex) ?: it.primary },
+        )
+        if (fallbackPrepared) return
+      }
     }
   }
 

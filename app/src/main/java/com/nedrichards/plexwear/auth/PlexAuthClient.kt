@@ -110,43 +110,51 @@ object PlexAuthXmlParser {
     val document = DocumentBuilderFactory.newInstance()
       .newDocumentBuilder()
       .parse(InputSource(xml.reader()))
-    val candidates = document.elements("Device", "device", "Resource", "resource")
+    val servers = document.elements("Device", "device", "Resource", "resource")
       .filter { device ->
         device.attr("provides")
           .split(',')
           .map(String::trim)
           .any { it.equals("server", ignoreCase = true) }
       }
-      .flatMap { device ->
+      .mapNotNull { device ->
         val token = device.attr("accessToken").ifBlank { accountToken.orEmpty() }
-        if (token.isBlank()) return@flatMap emptySequence()
+        if (token.isBlank()) return@mapNotNull null
         val owned = device.attr("owned") == "1"
-        device.connectionElements().mapNotNull { connection ->
-          val uri = connection.attr("uri").trimEnd('/')
-          if (uri.isBlank()) return@mapNotNull null
-          PlexServerCandidate(
-            serverUrl = uri,
-            token = token,
-            owned = owned,
-            local = connection.attr("local") == "1",
-            https = connection.attr("protocol").equals("https", ignoreCase = true) || uri.startsWith("https://"),
-            relay = connection.attr("relay") == "1",
-          )
-        }
+        val connections = device.connectionElements()
+          .mapNotNull { connection ->
+            val uri = connection.attr("uri").trim().trimEnd('/')
+            if (uri.isBlank()) return@mapNotNull null
+            PlexServerConnection(
+              serverUrl = uri,
+              local = connection.attr("local") == "1",
+              https = connection.attr("protocol").equals("https", ignoreCase = true) || uri.startsWith("https://"),
+              relay = connection.attr("relay") == "1",
+            )
+          }
+          .distinctBy { it.serverUrl }
+          .toList()
+        if (connections.isEmpty()) return@mapNotNull null
+        PlexServerResource(token = token, owned = owned, connections = connections)
       }
       .toList()
 
-    val selected = candidates
+    val selected = servers
       .sortedWith(
-        compareByDescending<PlexServerCandidate> { if (it.owned) 1 else 0 }
-          .thenBy { if (it.relay) 1 else 0 }
-          .thenByDescending { if (it.local) 1 else 0 }
-          .thenByDescending { if (it.https) 1 else 0 },
+        compareByDescending<PlexServerResource> { if (it.owned) 1 else 0 }
+          .thenBy { if (it.bestConnection.relay) 1 else 0 }
+          .thenByDescending { if (it.bestConnection.local) 1 else 0 }
+          .thenByDescending { if (it.bestConnection.https) 1 else 0 },
       )
       .firstOrNull()
 
     if (selected != null) {
-      return PlexCredentials(selected.serverUrl, selected.token)
+      val orderedConnections = selected.connections.sortedWith(connectionComparator)
+      return PlexCredentials(
+        serverUrl = orderedConnections.first().serverUrl,
+        token = selected.token,
+        alternateServerUrls = orderedConnections.drop(1).map { it.serverUrl },
+      )
     }
 
     val debugServerUrl = fallbackServerUrl.orEmpty().trim().trimEnd('/')
@@ -157,14 +165,25 @@ object PlexAuthXmlParser {
     error("No Plex server connection was found for this account")
   }
 
-  private data class PlexServerCandidate(
-    val serverUrl: String,
+  private data class PlexServerResource(
     val token: String,
     val owned: Boolean,
+    val connections: List<PlexServerConnection>,
+  ) {
+    val bestConnection: PlexServerConnection = connections.sortedWith(connectionComparator).first()
+  }
+
+  private data class PlexServerConnection(
+    val serverUrl: String,
     val local: Boolean,
     val https: Boolean,
     val relay: Boolean,
   )
+
+  private val connectionComparator =
+    compareBy<PlexServerConnection> { if (it.relay) 1 else 0 }
+      .thenByDescending { if (it.local) 1 else 0 }
+      .thenByDescending { if (it.https) 1 else 0 }
 
   private fun parseRoot(xml: String): Element =
     DocumentBuilderFactory.newInstance()

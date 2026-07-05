@@ -1,6 +1,7 @@
 package com.nedrichards.plexwear.data
 
 import com.nedrichards.plexwear.auth.PlexCredentials
+import java.util.concurrent.atomic.AtomicInteger
 
 class PlexRepository(private val api: PlexApi) {
   suspend fun musicLibraries(credentials: PlexCredentials): List<PlexLibrary> =
@@ -20,4 +21,23 @@ class PlexRepository(private val api: PlexApi) {
 
   suspend fun tracksForPlaylist(credentials: PlexCredentials, playlist: PlexPlaylist): List<PlexTrack> =
     PlexXmlParser.tracks(api.get(credentials, playlist.key))
+
+  suspend fun activeSessions(credentials: PlexCredentials): List<PlexSession> =
+    PlexXmlParser.sessions(api.get(credentials, "/status/sessions"))
+
+  suspend fun toggleSessionPlayback(credentials: PlexCredentials, session: PlexSession) {
+    api.get(
+      credentials = credentials,
+      path = "/player/playback/${session.playbackAction.pathSegment}",
+      query = mapOf(
+        "type" to session.controlType,
+        "commandID" to commandIds.incrementAndGet().toString(),
+      ),
+      headers = mapOf("X-Plex-Target-Client-Identifier" to session.playerMachineIdentifier),
+    )
+  }
+
+  private companion object {
+    val commandIds = AtomicInteger(1)
+  }
 }

@@ -32,6 +32,30 @@ data class PlexTrack(
   val audioCodec: String? = null,
 )
 
+data class PlexSession(
+  val sessionKey: String,
+  val title: String,
+  val subtitle: String?,
+  val type: String,
+  val playerTitle: String?,
+  val playerMachineIdentifier: String,
+  val state: String?,
+) {
+  val controlType: String = when (type.lowercase()) {
+    "track" -> "music"
+    "episode", "movie", "video" -> "video"
+    else -> type.lowercase().ifBlank { "music" }
+  }
+  val paused: Boolean = state == "paused"
+  val canTogglePlayback: Boolean = playerMachineIdentifier.isNotBlank()
+  val playbackAction: PlexPlaybackAction = if (paused) PlexPlaybackAction.Play else PlexPlaybackAction.Pause
+}
+
+enum class PlexPlaybackAction(val pathSegment: String) {
+  Play("play"),
+  Pause("pause"),
+}
+
 sealed interface BrowseItem {
   data class LibraryItem(val library: PlexLibrary) : BrowseItem
   data class AlbumItem(val album: PlexAlbum) : BrowseItem

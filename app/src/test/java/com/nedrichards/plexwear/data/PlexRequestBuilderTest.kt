@@ -23,6 +23,21 @@ class PlexRequestBuilderTest {
   }
 
   @Test
+  fun build_addsRequestSpecificHeaders() {
+    val request = PlexRequestBuilder.build(
+      credentials = credentials,
+      path = "/player/playback/pause",
+      query = mapOf("type" to "music", "commandID" to "2"),
+      headers = mapOf("X-Plex-Target-Client-Identifier" to "player-1"),
+    )
+
+    assertTrue(request.url.contains("type=music"))
+    assertTrue(request.url.contains("commandID=2"))
+    assertTrue(!request.url.contains("machineIdentifier=player-1"))
+    assertEquals("player-1", request.headers["X-Plex-Target-Client-Identifier"])
+  }
+
+  @Test
   fun transcodeUrl_requestsDefaultAacStream() {
     val track = PlexTrack(
       ratingKey = "1",

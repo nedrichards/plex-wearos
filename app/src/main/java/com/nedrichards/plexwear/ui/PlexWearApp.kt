@@ -50,6 +50,7 @@ import androidx.wear.input.RemoteInputIntentHelper
 import com.nedrichards.plexwear.BuildConfig
 import com.nedrichards.plexwear.auth.PlexCredentials
 import com.nedrichards.plexwear.data.BrowseItem
+import com.nedrichards.plexwear.data.PlexSession
 import com.nedrichards.plexwear.data.PlexTrack
 import kotlinx.coroutines.launch
 
@@ -103,6 +104,8 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
         onPrevious = viewModel::skipToPrevious,
         onNext = viewModel::skipToNext,
         onPlaylists = viewModel::loadPlaylists,
+        onSessions = viewModel::loadSessions,
+        onToggleSessionPlayback = viewModel::toggleSessionPlayback,
         onCycleOfflineQuality = viewModel::cycleOfflineQuality,
         onClearOfflineCache = viewModel::clearOfflineCache,
       )
@@ -132,6 +135,8 @@ private fun PlexWearScreen(
   onPrevious: () -> Unit,
   onNext: () -> Unit,
   onPlaylists: () -> Unit,
+  onSessions: () -> Unit,
+  onToggleSessionPlayback: (PlexSession) -> Unit,
   onCycleOfflineQuality: () -> Unit,
   onClearOfflineCache: () -> Unit,
 ) {
@@ -186,7 +191,7 @@ private fun PlexWearScreen(
     }
 
     when (state.screen) {
-      Screen.Home -> HomeContent(state, onItemClick, onPlay, onPlaylists, onSettings)
+      Screen.Home -> HomeContent(state, onItemClick, onPlay, onPlaylists, onSessions, onSettings)
       Screen.Albums, Screen.Playlists -> BrowseContent(state, onItemClick, onHome, onSearch, onClearSearch)
       Screen.Tracks -> TracksContent(
         state,
@@ -199,6 +204,7 @@ private fun PlexWearScreen(
       )
       Screen.Track -> TrackContent(state, onPlay, onDownloadTrack, onTrackList, onHome)
       Screen.NowPlaying -> NowPlayingContent(state, onTogglePlayback, onPrevious, onNext, onHome)
+      Screen.Sessions -> SessionsContent(state, onToggleSessionPlayback, onSessions, onHome)
       Screen.Settings -> SettingsContent(state, onHome, onReset, onCycleOfflineQuality, onClearOfflineCache)
     }
   }
@@ -210,6 +216,7 @@ private fun HomeContent(
   onItemClick: (BrowseItem) -> Unit,
   onPlay: (PlexTrack) -> Unit,
   onPlaylists: () -> Unit,
+  onSessions: () -> Unit,
   onSettings: () -> Unit,
 ) {
   NavigationRow(
@@ -217,6 +224,12 @@ private fun HomeContent(
     subtitle = "Saved playlists",
     icon = RowIcon.Playlist,
     onClick = onPlaylists,
+  )
+  NavigationRow(
+    title = "Active streams",
+    subtitle = "Pause other players",
+    icon = RowIcon.Track,
+    onClick = onSessions,
   )
   state.items.forEach { item -> BrowseRow(state.credentials, item, onItemClick) }
   if (state.tracks.isNotEmpty()) {
@@ -229,6 +242,23 @@ private fun HomeContent(
     icon = RowIcon.Settings,
     onClick = onSettings,
   )
+}
+
+@Composable
+private fun SessionsContent(
+  state: PlexWearUiState,
+  onToggleSessionPlayback: (PlexSession) -> Unit,
+  onRefresh: () -> Unit,
+  onHome: () -> Unit,
+) {
+  if (state.sessions.isEmpty()) {
+    StatusText("No active streams.")
+  }
+  state.sessions.forEach { session ->
+    SessionRow(session = session, onTogglePlayback = { onToggleSessionPlayback(session) })
+  }
+  AppButton(text = "Refresh", onClick = onRefresh)
+  AppButton(text = "Home", onClick = onHome)
 }
 
 @Composable
@@ -426,6 +456,37 @@ private fun TrackRow(
     fallbackIcon = RowIcon.Track,
     onClick = { onPlay(track) },
   )
+}
+
+@Composable
+private fun SessionRow(
+  session: PlexSession,
+  onTogglePlayback: () -> Unit,
+) {
+  val subtitle = listOfNotNull(
+    if (session.paused) "Resume" else "Pause",
+    session.playerTitle,
+    session.subtitle,
+    session.state,
+  ).joinToString(" - ").ifBlank { null }
+  Button(
+    onClick = onTogglePlayback,
+    enabled = session.canTogglePlayback,
+    modifier = Modifier.fillMaxWidth(),
+    colors = ButtonDefaults.filledTonalButtonColors(),
+  ) {
+    Column(Modifier.fillMaxWidth()) {
+      Text(session.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      subtitle?.let {
+        Text(
+          it,
+          style = MaterialTheme.typography.bodySmall,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+    }
+  }
 }
 
 @Composable

@@ -20,13 +20,17 @@ data class PlexMediaItemSpec(
 
 data class PlexPlaybackPlan(
   val primary: MediaItem,
-  val fallback: MediaItem?,
-)
+  val fallbacks: List<MediaItem> = emptyList(),
+) {
+  val fallback: MediaItem? = fallbacks.firstOrNull()
+}
 
 data class PlexPlaybackPlanSpec(
   val primary: PlexMediaItemSpec,
-  val fallback: PlexMediaItemSpec?,
-)
+  val fallbacks: List<PlexMediaItemSpec> = emptyList(),
+) {
+  val fallback: PlexMediaItemSpec? = fallbacks.firstOrNull()
+}
 
 object PlexMediaItems {
   fun playbackPlan(
@@ -38,7 +42,7 @@ object PlexMediaItems {
     playbackPlanSpec(credentials, track, quality, cachedUri).let { spec ->
       PlexPlaybackPlan(
         primary = mediaItem(spec.primary),
-        fallback = spec.fallback?.let(::mediaItem),
+        fallbacks = spec.fallbacks.map(::mediaItem),
       )
     }
 
@@ -51,16 +55,32 @@ object PlexMediaItems {
     if (cachedUri != null) {
       return PlexPlaybackPlanSpec(
         primary = mediaItemSpec(track, cachedUri),
-        fallback = streamingSpec(credentials, track, quality),
+        fallbacks = listOf(streamingSpec(credentials, track, quality)),
       )
     }
 
-    val direct = directSpec(credentials, track)
-    val transcode = transcodeSpec(credentials, track, quality)
+    val localCredentials = credentials.forServerUrl(credentials.serverUrls.first())
+    val direct = directSpec(localCredentials, track)
+    val transcode = transcodeSpec(localCredentials, track, quality)
+    val remoteFallbacks = credentials.serverUrls
+      .drop(1)
+      .flatMap { serverUrl ->
+        val candidateCredentials = credentials.forServerUrl(serverUrl)
+        val remoteDirect = directSpec(candidateCredentials, track)
+        val remoteTranscode = transcodeSpec(candidateCredentials, track, quality)
+        when {
+          track.prefersDirectPlay(candidateCredentials) -> listOf(remoteDirect, remoteTranscode)
+          else -> listOf(remoteTranscode, remoteDirect)
+        }
+      }
 
     return when {
-      track.prefersDirectPlay(credentials) -> PlexPlaybackPlanSpec(primary = direct, fallback = transcode)
-      else -> PlexPlaybackPlanSpec(primary = transcode, fallback = direct)
+      track.prefersDirectPlay(localCredentials) -> {
+        PlexPlaybackPlanSpec(primary = direct, fallbacks = listOf(transcode) + remoteFallbacks)
+      }
+      else -> {
+        PlexPlaybackPlanSpec(primary = transcode, fallbacks = listOf(direct) + remoteFallbacks)
+      }
     }
   }
 

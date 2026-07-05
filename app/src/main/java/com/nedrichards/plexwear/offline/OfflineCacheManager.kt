@@ -87,33 +87,59 @@ class OfflineCacheManager(context: Context) {
       cacheDirectory.mkdirs()
       val destination = cacheFile(track.ratingKey, quality)
       val temporary = File(cacheDirectory, "${destination.name}.tmp")
-      val url = PlexRequestBuilder.transcodeUrl(credentials, track, quality.bitrateKbps)
-      val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 10_000
-        readTimeout = 60_000
-        requestMethod = "GET"
-        PlexRequestBuilder.clientHeaders.forEach { (name, value) -> setRequestProperty(name, value) }
-        setRequestProperty("X-Plex-Token", credentials.token)
+      var lastFailure: Throwable? = null
+      credentials.serverUrls.forEach { serverUrl ->
+        runCatching {
+          downloadTrackToFile(
+            credentials = credentials.forServerUrl(serverUrl),
+            track = track,
+            quality = quality,
+            temporary = temporary,
+            destination = destination,
+          )
+        }.onSuccess {
+          return@withContext
+        }.onFailure { throwable ->
+          lastFailure = throwable
+        }
       }
+      throw lastFailure ?: IllegalStateException("Plex credentials are not configured")
+    }
+  }
 
-      try {
-        val responseCode = connection.responseCode
-        if (responseCode !in 200..299) {
-          val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-          error("Plex download failed HTTP $responseCode: ${body.take(120)}")
-        }
-        connection.inputStream.use { input ->
-          temporary.outputStream().use { output -> input.copyTo(output) }
-        }
-        if (temporary.length() == 0L) error("Plex download returned an empty file")
-        if (!temporary.renameTo(destination)) {
-          destination.delete()
-          check(temporary.renameTo(destination)) { "Could not store downloaded track" }
-        }
-      } finally {
-        connection.disconnect()
-        temporary.delete()
+  private fun downloadTrackToFile(
+    credentials: PlexCredentials,
+    track: PlexTrack,
+    quality: OfflineQuality,
+    temporary: File,
+    destination: File,
+  ) {
+    val url = PlexRequestBuilder.transcodeUrl(credentials, track, quality.bitrateKbps)
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+      connectTimeout = 10_000
+      readTimeout = 60_000
+      requestMethod = "GET"
+      PlexRequestBuilder.clientHeaders.forEach { (name, value) -> setRequestProperty(name, value) }
+      setRequestProperty("X-Plex-Token", credentials.token)
+    }
+
+    try {
+      val responseCode = connection.responseCode
+      if (responseCode !in 200..299) {
+        val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        error("Plex download failed HTTP $responseCode: ${body.take(120)}")
       }
+      connection.inputStream.use { input ->
+        temporary.outputStream().use { output -> input.copyTo(output) }
+      }
+      if (temporary.length() == 0L) error("Plex download returned an empty file")
+      if (!temporary.renameTo(destination)) {
+        destination.delete()
+        check(temporary.renameTo(destination)) { "Could not store downloaded track" }
+      }
+    } finally {
+      connection.disconnect()
+      temporary.delete()
     }
   }
 

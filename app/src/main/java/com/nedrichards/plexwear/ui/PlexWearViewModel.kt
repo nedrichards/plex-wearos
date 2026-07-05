@@ -10,6 +10,7 @@ import com.nedrichards.plexwear.data.BrowseItem
 import com.nedrichards.plexwear.data.PlexAlbum
 import com.nedrichards.plexwear.data.PlexLibrary
 import com.nedrichards.plexwear.data.PlexPlaylist
+import com.nedrichards.plexwear.data.PlexSession
 import com.nedrichards.plexwear.data.PlexRepository
 import com.nedrichards.plexwear.data.PlexTrack
 import com.nedrichards.plexwear.offline.OfflineCacheManager
@@ -39,6 +40,7 @@ data class PlexWearUiState(
   val title: String = "Plex Wear",
   val items: List<BrowseItem> = emptyList(),
   val tracks: List<PlexTrack> = emptyList(),
+  val sessions: List<PlexSession> = emptyList(),
   val trackListTitle: String? = null,
   val selectedTrack: PlexTrack? = null,
   val nowPlaying: PlexTrack? = null,
@@ -73,6 +75,7 @@ enum class Screen {
   Tracks,
   Track,
   NowPlaying,
+  Sessions,
   Settings,
 }
 
@@ -175,6 +178,32 @@ class PlexWearViewModel(
       }
       val playlists = repository.playlists(credentials).map(BrowseItem::PlaylistItem)
       _uiState.update { it.copy(items = playlists, tracks = emptyList(), loading = false) }
+    }
+  }
+
+  fun loadSessions() {
+    withCredentials { credentials ->
+      _uiState.update {
+        it.copy(
+          screen = Screen.Sessions,
+          title = "Active streams",
+          loading = true,
+          error = null,
+          searchQuery = "",
+          selectedTrack = null,
+        )
+      }
+      val sessions = repository.activeSessions(credentials)
+      _uiState.update { it.copy(sessions = sessions, loading = false, error = null) }
+    }
+  }
+
+  fun toggleSessionPlayback(session: PlexSession) {
+    withCredentials { credentials ->
+      _uiState.update { it.copy(error = null) }
+      repository.toggleSessionPlayback(credentials, session)
+      val sessions = repository.activeSessions(credentials)
+      _uiState.update { it.copy(sessions = sessions, loading = false, error = null) }
     }
   }
 
@@ -474,7 +503,7 @@ class PlexWearViewModel(
           it.copy(auth = it.auth.copy(message = "Finding your Plex server...", waiting = true))
         }
         val credentials = authClient.credentialsForToken(token)
-        authStore.save(credentials.serverUrl, credentials.token)
+        authStore.save(credentials)
         _uiState.update {
           it.copy(
             credentials = credentials,
@@ -520,6 +549,7 @@ class PlexWearViewModel(
           title = "Plex Wear",
           items = emptyList(),
           tracks = emptyList(),
+          sessions = emptyList(),
           trackListTitle = null,
           selectedTrack = null,
           nowPlaying = null,

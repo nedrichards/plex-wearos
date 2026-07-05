@@ -69,4 +69,45 @@ class PlexXmlParserTest {
     assertEquals("/library/parts/99/file.flac", track.partKey)
     assertEquals("flac", track.audioCodec)
   }
+
+  @Test
+  fun sessions_readsPlayerAndTrackMetadata() {
+    val xml = """
+      <MediaContainer>
+        <Track sessionKey="7" type="track" title="Dinner Bell" parentTitle="Album" grandparentTitle="Artist">
+          <User title="Daughter" />
+          <Player title="Bedroom speaker" machineIdentifier="player-1" state="playing" />
+        </Track>
+      </MediaContainer>
+    """.trimIndent()
+
+    val session = PlexXmlParser.sessions(xml).single()
+
+    assertEquals("7", session.sessionKey)
+    assertEquals("Dinner Bell", session.title)
+    assertEquals("Artist - Album - Daughter", session.subtitle)
+    assertEquals("music", session.controlType)
+    assertEquals("Bedroom speaker", session.playerTitle)
+    assertEquals("player-1", session.playerMachineIdentifier)
+    assertEquals(false, session.paused)
+    assertEquals(PlexPlaybackAction.Pause, session.playbackAction)
+    assertEquals(true, session.canTogglePlayback)
+  }
+
+  @Test
+  fun sessions_marksPausedSessionsAsPlayable() {
+    val xml = """
+      <MediaContainer>
+        <Track sessionKey="7" type="track" title="Dinner Bell">
+          <Player title="Bedroom speaker" machineIdentifier="player-1" state="paused" />
+        </Track>
+      </MediaContainer>
+    """.trimIndent()
+
+    val session = PlexXmlParser.sessions(xml).single()
+
+    assertEquals(true, session.paused)
+    assertEquals(PlexPlaybackAction.Play, session.playbackAction)
+    assertEquals(true, session.canTogglePlayback)
+  }
 }

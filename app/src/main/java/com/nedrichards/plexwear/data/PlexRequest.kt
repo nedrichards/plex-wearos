@@ -20,6 +20,15 @@ object PlexRequestBuilder {
   )
 
   fun build(credentials: PlexCredentials, path: String, query: Map<String, String> = emptyMap()): PlexRequest {
+    return build(credentials, path, query, emptyMap())
+  }
+
+  fun build(
+    credentials: PlexCredentials,
+    path: String,
+    query: Map<String, String> = emptyMap(),
+    headers: Map<String, String>,
+  ): PlexRequest {
     require(credentials.isConfigured) { "Plex credentials are not configured" }
     val normalizedPath = if (path.startsWith("/")) path else "/$path"
     val parameters = query + ("X-Plex-Token" to credentials.token)
@@ -28,7 +37,7 @@ object PlexRequestBuilder {
     }
     return PlexRequest(
       url = "${credentials.serverUrl.trimEnd('/')}$normalizedPath?$queryString",
-      headers = clientHeaders + ("X-Plex-Token" to credentials.token),
+      headers = clientHeaders + headers + ("X-Plex-Token" to credentials.token),
     )
   }
 

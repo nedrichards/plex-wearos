@@ -65,6 +65,23 @@ class PlexMediaItemsTest {
   }
 
   @Test
+  fun playbackPlan_addsAlternateServerFallbacks() {
+    val plan = PlexMediaItems.playbackPlanSpec(
+      credentials = PlexCredentials(
+        serverUrl = "http://192.168.1.2:32400",
+        token = "token",
+        alternateServerUrls = listOf("https://remote.example.test:32400"),
+      ),
+      track = track(audioCodec = "flac", partKey = "/library/parts/42/file.flac"),
+    )
+
+    assertEquals("http://192.168.1.2:32400/library/parts/42/file.flac?X-Plex-Token=token", plan.primary.uri)
+    assertEquals("http://192.168.1.2:32400/music/:/transcode/universal/start", plan.fallbacks[0].uri.substringBefore("?"))
+    assertEquals("https://remote.example.test:32400/music/:/transcode/universal/start", plan.fallbacks[1].uri.substringBefore("?"))
+    assertEquals("https://remote.example.test:32400/library/parts/42/file.flac?X-Plex-Token=token", plan.fallbacks[2].uri)
+  }
+
+  @Test
   fun playbackPlan_usesSelectedTranscodeQuality() {
     val plan = PlexMediaItems.playbackPlanSpec(
       credentials = PlexCredentials("https://plex.example.test", "token"),

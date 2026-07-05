@@ -46,6 +46,7 @@ class PlexAuthXmlParserTest {
 
     assertEquals("http://192.168.1.2:32400", credentials.serverUrl)
     assertEquals("server-token", credentials.token)
+    assertEquals(listOf("https://mine.example.test:32400"), credentials.alternateServerUrls)
   }
 
   @Test

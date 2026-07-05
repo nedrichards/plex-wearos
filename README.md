@@ -10,8 +10,9 @@ On first launch, sign in with the code shown on the watch at:
 https://plex.tv/link
 ```
 
-The app stores the selected Plex server URL and server token locally on the
-watch.
+The app stores the selected Plex server connections and server token locally on
+the watch. Local connections are tried first, with the server's remote
+connection used as a fallback when the watch is away from the home network.
 
 ## Debug Plex credentials
 
@@ -29,6 +30,13 @@ Release builds set the generated Plex `BuildConfig` fields to empty strings.
 ## Playback
 
 Selecting a track from an album or playlist opens track actions for playback and download. The app direct plays MP3 and AAC, direct plays FLAC when the configured Plex server URL looks local/private and otherwise uses Plex's HTTP AAC transcode endpoint for FLAC to avoid high-bandwidth remote streaming. If the first playback path fails during startup, the app silently falls back to the other path.
+
+## Remote control
+
+`Active streams` on the home screen lists current Plex sessions from
+`/status/sessions`. Selecting a session sends a Plex play or pause command to
+that player, so the watch can stop and resume another Plex or Plexamp stream
+without becoming the playback device.
 
 ## Offline playback
 
