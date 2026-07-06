@@ -12,23 +12,23 @@
         <path
             android:fillColor="#00000000"
             android:pathData="M32,40a22,22 0,0 1,44 0v28a22,22 0,0 1,-44 0z"
-            android:strokeColor="#F4F7FA"
+            android:strokeColor="#FFFFFFFF"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
             android:strokeWidth="5" />
         <path
             android:fillColor="#00000000"
             android:pathData="M43,27h22M43,81h22"
-            android:strokeColor="#F4F7FA"
+            android:strokeColor="#FFFFFFFF"
             android:strokeLineCap="round"
             android:strokeWidth="5" />
         <path
-            android:fillColor="#E5A12F"
+            android:fillColor="#FFFFFFFF"
             android:pathData="M48,43l18,11l-18,11z" />
         <path
             android:fillColor="#00000000"
             android:pathData="M39,70c6,4 24,4 30,0"
-            android:strokeColor="#E5A12F"
+            android:strokeColor="#FFFFFFFF"
             android:strokeLineCap="round"
             android:strokeWidth="4" />
     </group>
