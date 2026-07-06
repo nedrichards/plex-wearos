@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -13,7 +14,60 @@ val localProperties = Properties().apply {
   }
 }
 
+val keystoreProperties = Properties().apply {
+  val keystorePropertiesFile = rootProject.file("keystore.properties")
+  if (keystorePropertiesFile.isFile) {
+    keystorePropertiesFile.inputStream().use(::load)
+  }
+}
+
 fun String.asBuildConfigString(): String = "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+fun releaseProperty(name: String, environmentName: String): String? =
+  providers.gradleProperty("plexWear.$name").orNull
+    ?: localProperties.getProperty("plexWear.$name")
+    ?: keystoreProperties.getProperty(name)
+    ?: providers.environmentVariable(environmentName).orNull
+
+fun debugSigningProperty(name: String): String? =
+  providers.gradleProperty("androidDebugSigning.$name").orNull
+    ?: localProperties.getProperty("androidDebugSigning.$name")
+
+fun localBooleanProperty(name: String): Boolean {
+  val value = providers.gradleProperty(name).orNull
+    ?: localProperties.getProperty(name)
+  return value.equals("true", ignoreCase = true)
+}
+
+val debugStoreFile = debugSigningProperty("storeFile")
+val debugStorePassword = debugSigningProperty("storePassword") ?: "android"
+val debugKeyAlias = debugSigningProperty("keyAlias") ?: "androiddebugkey"
+val debugKeyPassword = debugSigningProperty("keyPassword") ?: debugStorePassword
+val hasStableDebugSigning = !debugStoreFile.isNullOrBlank()
+val debugSignRelease = localBooleanProperty("plexWear.debugSignRelease")
+
+val releaseStoreFile = releaseProperty("storeFile", "PLEX_WEAR_KEYSTORE_FILE")
+val releaseStorePassword = releaseProperty("storePassword", "PLEX_WEAR_KEYSTORE_PASSWORD")
+val releaseKeyAlias = releaseProperty("keyAlias", "PLEX_WEAR_KEY_ALIAS")
+val releaseKeyPassword = releaseProperty("keyPassword", "PLEX_WEAR_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+  releaseStoreFile,
+  releaseStorePassword,
+  releaseKeyAlias,
+  releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
+fun configuredFile(path: String): File {
+  val home = System.getProperty("user.home")
+  val expanded = when {
+    path == "~" -> home
+    path.startsWith("~/") -> "$home/${path.removePrefix("~/")}"
+    path.startsWith("\$HOME/") -> "$home/${path.removePrefix("\$HOME/")}"
+    path.startsWith("\${user.home}/") -> "$home/${path.removePrefix("\${user.home}/")}"
+    else -> path
+  }
+  return file(expanded)
+}
 
 android {
     namespace = "com.nedrichards.plexwear"
@@ -22,12 +76,40 @@ android {
         applicationId = "com.nedrichards.plexwear"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = (
+          providers.gradleProperty("plexWear.versionCode").orNull
+            ?: localProperties.getProperty("plexWear.versionCode")
+            ?: "1"
+          ).toInt()
+        versionName = providers.gradleProperty("plexWear.versionName").orNull
+          ?: localProperties.getProperty("plexWear.versionName")
+          ?: "1.0"
+    }
+
+    signingConfigs {
+        if (hasStableDebugSigning) {
+            create("stableDebug") {
+                storeFile = configuredFile(debugStoreFile!!)
+                storePassword = debugStorePassword
+                keyAlias = debugKeyAlias
+                keyPassword = debugKeyPassword
+            }
+        }
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = configuredFile(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         debug {
+            if (hasStableDebugSigning) {
+                signingConfig = signingConfigs.getByName("stableDebug")
+            }
             buildConfigField("String", "DEBUG_PLEX_SERVER_URL", (localProperties.getProperty("plex.serverUrl") ?: "").asBuildConfigString())
             buildConfigField("String", "DEBUG_PLEX_TOKEN", (localProperties.getProperty("plex.token") ?: "").asBuildConfigString())
         }
@@ -36,7 +118,12 @@ android {
             buildConfigField("String", "DEBUG_PLEX_SERVER_URL", "\"\"")
             buildConfigField("String", "DEBUG_PLEX_TOKEN", "\"\"")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = when {
+                hasReleaseSigning -> signingConfigs.getByName("release")
+                debugSignRelease && hasStableDebugSigning -> signingConfigs.getByName("stableDebug")
+                debugSignRelease -> signingConfigs.getByName("debug")
+                else -> null
+            }
         }
     }
     compileOptions {

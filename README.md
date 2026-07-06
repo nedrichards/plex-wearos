@@ -68,3 +68,6 @@ Check the watch-only manifest gate:
 ```sh
 "${ANDROID_HOME}/build-tools/36.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk
 ```
+
+Release signing and local debug-signed release builds are documented in
+`docs/android-release-signing.md`.
