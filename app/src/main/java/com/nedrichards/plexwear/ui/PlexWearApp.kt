@@ -34,6 +34,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -342,7 +343,9 @@ private fun LazyListScope.sessionsContent(
   onToggleSessionPlayback: (PlexSession) -> Unit,
   onRefresh: () -> Unit,
 ) {
-  item(key = "sessions-refresh") { AppButton(text = "Refresh", onClick = onRefresh) }
+  item(key = "sessions-refresh") {
+    IconActionButton(icon = ActionIcon.Refresh, label = "Refresh", onClick = onRefresh)
+  }
   if (state.sessions.isEmpty()) {
     item(key = "sessions-empty") { StatusText("No active streams.") }
   }
@@ -413,19 +416,19 @@ private fun LazyListScope.tracksContent(
     item(key = "track-actions") {
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
       ) {
-        AppButton(
-          text = "Play all",
+        IconActionButton(
+          icon = ActionIcon.Play,
+          label = "Play all",
           onClick = { onPlayAll(tracks) },
           enabled = tracks.isNotEmpty(),
-          modifier = Modifier.weight(1f),
         )
-        AppButton(
-          text = "Download",
+        IconActionButton(
+          icon = ActionIcon.Download,
+          label = "Download tracks",
           onClick = { onDownloadTracks(state.tracks) },
           enabled = state.tracks.isNotEmpty(),
-          modifier = Modifier.weight(1f),
         )
       }
     }
@@ -458,9 +461,18 @@ private fun TrackContent(
   track.album?.let { StatusText(it) }
   track.durationMs?.let { StatusText(it.formatDuration()) }
   state.offlineStatus(track)?.let { StatusText(it) }
-  AppButton(text = "Play", onClick = { onPlay(track) })
-  if (state.downloadedQuality(track) == null && !state.isDownloading(track)) {
-    AppButton(text = "Download ${state.offlineQuality.bitrateKbps}k", onClick = { onDownloadTrack(track) })
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+  ) {
+    IconActionButton(icon = ActionIcon.Play, label = "Play", onClick = { onPlay(track) })
+    if (state.downloadedQuality(track) == null && !state.isDownloading(track)) {
+      IconActionButton(
+        icon = ActionIcon.Download,
+        label = "Download ${state.offlineQuality.bitrateKbps}k",
+        onClick = { onDownloadTrack(track) },
+      )
+    }
   }
   AppButton(text = "Tracks", onClick = onTrackList)
 }
@@ -517,22 +529,26 @@ private fun NowPlayingContent(
     Text(it.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
     it.artist?.let { artist -> StatusText(artist) }
   }
-  AppButton(text = if (state.playbackPaused) "Resume" else "Pause", onClick = onTogglePlayback)
   Row(
     modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
   ) {
-    AppButton(
-      text = "Previous",
+    IconActionButton(
+      icon = ActionIcon.Previous,
+      label = "Previous",
       onClick = onPrevious,
       enabled = state.canPlayPrevious,
-      modifier = Modifier.weight(1f),
     )
-    AppButton(
-      text = "Next",
+    IconActionButton(
+      icon = if (state.playbackPaused) ActionIcon.Play else ActionIcon.Pause,
+      label = if (state.playbackPaused) "Resume" else "Pause",
+      onClick = onTogglePlayback,
+    )
+    IconActionButton(
+      icon = ActionIcon.Next,
+      label = "Next",
       onClick = onNext,
       enabled = state.canPlayNext,
-      modifier = Modifier.weight(1f),
     )
   }
 }
@@ -708,19 +724,32 @@ private fun IconActionButton(
   icon: ActionIcon,
   label: String,
   onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  enabled: Boolean = true,
 ) {
-  val foreground = MaterialTheme.colorScheme.onSecondaryContainer
+  val foreground = if (enabled) {
+    MaterialTheme.colorScheme.onSecondaryContainer
+  } else {
+    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+  }
   Button(
     onClick = onClick,
-    modifier = Modifier
+    enabled = enabled,
+    modifier = modifier
       .size(40.dp)
       .semantics { contentDescription = label },
     colors = ButtonDefaults.filledTonalButtonColors(),
   ) {
     Canvas(Modifier.size(18.dp)) {
       when (icon) {
-        ActionIcon.Search -> drawSearchIcon(foreground)
         ActionIcon.Clear -> drawClearIcon(foreground)
+        ActionIcon.Download -> drawDownloadIcon(foreground)
+        ActionIcon.Next -> drawNextIcon(foreground)
+        ActionIcon.Pause -> drawPauseIcon(foreground)
+        ActionIcon.Play -> drawPlayIcon(foreground)
+        ActionIcon.Previous -> drawPreviousIcon(foreground)
+        ActionIcon.Refresh -> drawRefreshIcon(foreground)
+        ActionIcon.Search -> drawSearchIcon(foreground)
       }
     }
   }
@@ -819,6 +848,12 @@ private enum class RowIcon {
 
 private enum class ActionIcon {
   Clear,
+  Download,
+  Next,
+  Pause,
+  Play,
+  Previous,
+  Refresh,
   Search,
 }
 
@@ -966,6 +1001,128 @@ private fun DrawScope.drawClearIcon(color: Color) {
     end = Offset(size.width * 0.28f, size.height * 0.72f),
     strokeWidth = strokeWidth,
     cap = StrokeCap.Round,
+  )
+}
+
+private fun DrawScope.drawPlayIcon(color: Color) {
+  drawPath(
+    path = Path().apply {
+      moveTo(size.width * 0.35f, size.height * 0.22f)
+      lineTo(size.width * 0.35f, size.height * 0.78f)
+      lineTo(size.width * 0.78f, size.height * 0.5f)
+      close()
+    },
+    color = color,
+  )
+}
+
+private fun DrawScope.drawPauseIcon(color: Color) {
+  val corner = CornerRadius(size.minDimension * 0.04f)
+  drawRoundRect(
+    color = color,
+    topLeft = Offset(size.width * 0.3f, size.height * 0.22f),
+    size = Size(size.width * 0.14f, size.height * 0.56f),
+    cornerRadius = corner,
+  )
+  drawRoundRect(
+    color = color,
+    topLeft = Offset(size.width * 0.56f, size.height * 0.22f),
+    size = Size(size.width * 0.14f, size.height * 0.56f),
+    cornerRadius = corner,
+  )
+}
+
+private fun DrawScope.drawPreviousIcon(color: Color) {
+  val strokeWidth = size.minDimension * 0.1f
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.25f, size.height * 0.24f),
+    end = Offset(size.width * 0.25f, size.height * 0.76f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+  drawPath(
+    path = Path().apply {
+      moveTo(size.width * 0.74f, size.height * 0.24f)
+      lineTo(size.width * 0.34f, size.height * 0.5f)
+      lineTo(size.width * 0.74f, size.height * 0.76f)
+      close()
+    },
+    color = color,
+  )
+}
+
+private fun DrawScope.drawNextIcon(color: Color) {
+  val strokeWidth = size.minDimension * 0.1f
+  drawPath(
+    path = Path().apply {
+      moveTo(size.width * 0.26f, size.height * 0.24f)
+      lineTo(size.width * 0.66f, size.height * 0.5f)
+      lineTo(size.width * 0.26f, size.height * 0.76f)
+      close()
+    },
+    color = color,
+  )
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.75f, size.height * 0.24f),
+    end = Offset(size.width * 0.75f, size.height * 0.76f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+}
+
+private fun DrawScope.drawDownloadIcon(color: Color) {
+  val strokeWidth = size.minDimension * 0.11f
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.5f, size.height * 0.22f),
+    end = Offset(size.width * 0.5f, size.height * 0.58f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.32f, size.height * 0.43f),
+    end = Offset(size.width * 0.5f, size.height * 0.61f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.68f, size.height * 0.43f),
+    end = Offset(size.width * 0.5f, size.height * 0.61f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.28f, size.height * 0.78f),
+    end = Offset(size.width * 0.72f, size.height * 0.78f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+}
+
+private fun DrawScope.drawRefreshIcon(color: Color) {
+  val strokeWidth = size.minDimension * 0.1f
+  drawArc(
+    color = color,
+    startAngle = 35f,
+    sweepAngle = 285f,
+    useCenter = false,
+    topLeft = Offset(size.width * 0.22f, size.height * 0.22f),
+    size = Size(size.width * 0.56f, size.height * 0.56f),
+    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+  )
+  drawPath(
+    path = Path().apply {
+      moveTo(size.width * 0.74f, size.height * 0.25f)
+      lineTo(size.width * 0.78f, size.height * 0.48f)
+      lineTo(size.width * 0.57f, size.height * 0.39f)
+      close()
+    },
+    color = color,
   )
 }
 
