@@ -8,19 +8,22 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,15 +145,22 @@ private fun PlexWearScreen(
   onCycleOfflineQuality: () -> Unit,
   onClearOfflineCache: () -> Unit,
 ) {
-  val scrollState = rememberScrollState()
+  val scrollState = rememberLazyListState()
   val focusRequester = FocusRequester()
   val coroutineScope = rememberCoroutineScope()
+  val filteredBrowseItems = remember(state.items, state.searchQuery) {
+    filterBrowseItems(state.items, state.searchQuery)
+  }
+  val filteredTracks = remember(state.tracks, state.searchQuery) {
+    filterTracks(state.tracks, state.searchQuery)
+  }
 
   LaunchedEffect(state.screen, state.title) {
     focusRequester.requestFocus()
   }
 
-  Column(
+  LazyColumn(
+    state = scrollState,
     modifier = Modifier
       .fillMaxSize()
       .focusRequester(focusRequester)
@@ -160,52 +170,89 @@ private fun PlexWearScreen(
         }
         true
       }
-      .focusable()
-      .verticalScroll(scrollState)
-      .padding(horizontal = 14.dp, vertical = 26.dp),
+      .focusable(),
+    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 26.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    Text(
-      text = state.title,
-      style = MaterialTheme.typography.titleMedium,
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis,
-    )
+    item(key = "title") {
+      Text(
+        text = state.title,
+        style = MaterialTheme.typography.titleMedium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
 
     if (state.loading) {
-      Spacer(Modifier.height(18.dp))
-      CircularProgressIndicator()
-      return@Column
-    }
+      item(key = "loading-spacer") { Spacer(Modifier.height(18.dp)) }
+      item(key = "loading") { CircularProgressIndicator() }
+    } else {
+      state.error?.let { error ->
+        item(key = "error") { StatusText(error) }
+      }
 
-    state.error?.let {
-      StatusText(it)
-    }
+      if (!state.configured && state.screen != Screen.Settings) {
+        item(key = "onboarding") {
+          ListItemGroup {
+            OnboardingContent(state.auth, onStartPinAuth, onCancelPinAuth, onSettings)
+          }
+        }
+      } else {
+        if (state.topLevelActions().isNotEmpty()) {
+          item(key = "top-level-actions") {
+            TopLevelActions(state, onHome, onCurrentPlayback)
+          }
+        }
 
-    if (!state.configured && state.screen != Screen.Settings) {
-      OnboardingContent(state.auth, onStartPinAuth, onCancelPinAuth, onSettings)
-      return@Column
+        when (state.screen) {
+          Screen.Home -> homeContent(state, onItemClick, onPlay, onPlaylists, onSessions, onSettings)
+          Screen.Albums, Screen.Playlists -> browseContent(
+            state,
+            filteredBrowseItems,
+            onItemClick,
+            onSearch,
+            onClearSearch,
+          )
+          Screen.Tracks -> tracksContent(
+            state,
+            filteredTracks,
+            onSelectTrack,
+            onPlayAll,
+            onDownloadTracks,
+            onSearch,
+            onClearSearch,
+          )
+          Screen.Track -> item(key = "track-content") {
+            ListItemGroup {
+              TrackContent(state, onPlay, onDownloadTrack, onTrackList)
+            }
+          }
+          Screen.NowPlaying -> item(key = "now-playing-content") {
+            ListItemGroup {
+              NowPlayingContent(state, onTogglePlayback, onPrevious, onNext)
+            }
+          }
+          Screen.Sessions -> sessionsContent(state, onToggleSessionPlayback, onSessions)
+          Screen.Settings -> item(key = "settings-content") {
+            ListItemGroup {
+              SettingsContent(state, onReset, onCycleOfflineQuality, onClearOfflineCache)
+            }
+          }
+        }
+      }
     }
+  }
+}
 
-    TopLevelActions(state, onHome, onCurrentPlayback)
-
-    when (state.screen) {
-      Screen.Home -> HomeContent(state, onItemClick, onPlay, onPlaylists, onSessions, onSettings)
-      Screen.Albums, Screen.Playlists -> BrowseContent(state, onItemClick, onSearch, onClearSearch)
-      Screen.Tracks -> TracksContent(
-        state,
-        onSelectTrack,
-        onPlayAll,
-        onDownloadTracks,
-        onSearch,
-        onClearSearch,
-      )
-      Screen.Track -> TrackContent(state, onPlay, onDownloadTrack, onTrackList)
-      Screen.NowPlaying -> NowPlayingContent(state, onTogglePlayback, onPrevious, onNext)
-      Screen.Sessions -> SessionsContent(state, onToggleSessionPlayback, onSessions)
-      Screen.Settings -> SettingsContent(state, onReset, onCycleOfflineQuality, onClearOfflineCache)
-    }
+@Composable
+private fun ListItemGroup(content: @Composable () -> Unit) {
+  Column(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    content()
   }
 }
 
@@ -247,8 +294,7 @@ private fun TopLevelActions(
   }
 }
 
-@Composable
-private fun HomeContent(
+private fun LazyListScope.homeContent(
   state: PlexWearUiState,
   onItemClick: (BrowseItem) -> Unit,
   onPlay: (PlexTrack) -> Unit,
@@ -256,42 +302,51 @@ private fun HomeContent(
   onSessions: () -> Unit,
   onSettings: () -> Unit,
 ) {
-  NavigationRow(
-    title = "Playlists",
-    subtitle = "Saved playlists",
-    icon = RowIcon.Playlist,
-    onClick = onPlaylists,
-  )
-  NavigationRow(
-    title = "Active streams",
-    subtitle = "Pause other players",
-    icon = RowIcon.Track,
-    onClick = onSessions,
-  )
-  state.items.forEach { item -> BrowseRow(state.credentials, item, onItemClick) }
-  if (state.tracks.isNotEmpty()) {
-    SectionLabel("Recent")
-    state.tracks.forEach { track -> TrackRow(state.credentials, track, onPlay) }
+  item(key = "home-playlists") {
+    NavigationRow(
+      title = "Playlists",
+      subtitle = "Saved playlists",
+      icon = RowIcon.Playlist,
+      onClick = onPlaylists,
+    )
   }
-  NavigationRow(
-    title = "Settings",
-    subtitle = "Account and server",
-    icon = RowIcon.Settings,
-    onClick = onSettings,
-  )
+  item(key = "home-sessions") {
+    NavigationRow(
+      title = "Active streams",
+      subtitle = "Pause other players",
+      icon = RowIcon.Track,
+      onClick = onSessions,
+    )
+  }
+  items(state.items, key = { it.browseStableKey() }) { item ->
+    BrowseRow(state.credentials, item, onItemClick)
+  }
+  if (state.tracks.isNotEmpty()) {
+    item(key = "recent-label") { SectionLabel("Recent") }
+    items(state.tracks, key = { "recent-${it.ratingKey}" }) { track ->
+      TrackRow(state.credentials, track, onPlay)
+    }
+  }
+  item(key = "home-settings") {
+    NavigationRow(
+      title = "Settings",
+      subtitle = "Account and server",
+      icon = RowIcon.Settings,
+      onClick = onSettings,
+    )
+  }
 }
 
-@Composable
-private fun SessionsContent(
+private fun LazyListScope.sessionsContent(
   state: PlexWearUiState,
   onToggleSessionPlayback: (PlexSession) -> Unit,
   onRefresh: () -> Unit,
 ) {
-  AppButton(text = "Refresh", onClick = onRefresh)
+  item(key = "sessions-refresh") { AppButton(text = "Refresh", onClick = onRefresh) }
   if (state.sessions.isEmpty()) {
-    StatusText("No active streams.")
+    item(key = "sessions-empty") { StatusText("No active streams.") }
   }
-  state.sessions.forEach { session ->
+  items(state.sessions, key = { it.sessionKey }) { session ->
     SessionRow(session = session, onTogglePlayback = { onToggleSessionPlayback(session) })
   }
 }
@@ -321,51 +376,61 @@ private fun OnboardingContent(
   }
 }
 
-@Composable
-private fun BrowseContent(
+private fun LazyListScope.browseContent(
   state: PlexWearUiState,
+  browseItems: List<BrowseItem>,
   onItemClick: (BrowseItem) -> Unit,
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
 ) {
-  val items = filterBrowseItems(state.items, state.searchQuery)
-  SearchControls(state.searchQuery, onSearch, onClearSearch)
-  if (items.isEmpty()) StatusText(if (state.searching) "No matches." else "Nothing found.")
-  items.forEach { item -> BrowseRow(state.credentials, item, onItemClick) }
+  item(key = "search-controls") {
+    SearchControls(state.searchQuery, onSearch, onClearSearch)
+  }
+  if (browseItems.isEmpty()) {
+    item(key = "browse-empty") { StatusText(if (state.searching) "No matches." else "Nothing found.") }
+  }
+  items(browseItems, key = { it.browseStableKey() }) { item ->
+    BrowseRow(state.credentials, item, onItemClick)
+  }
 }
 
-@Composable
-private fun TracksContent(
+private fun LazyListScope.tracksContent(
   state: PlexWearUiState,
+  tracks: List<PlexTrack>,
   onSelectTrack: (PlexTrack) -> Unit,
   onPlayAll: (List<PlexTrack>) -> Unit,
   onDownloadTracks: (List<PlexTrack>) -> Unit,
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
 ) {
-  val tracks = filterTracks(state.tracks, state.searchQuery)
-  SearchControls(state.searchQuery, onSearch, onClearSearch)
-  if (tracks.isEmpty()) StatusText(if (state.searching) "No matches." else "No tracks found.")
+  item(key = "search-controls") {
+    SearchControls(state.searchQuery, onSearch, onClearSearch)
+  }
+  if (tracks.isEmpty()) {
+    item(key = "tracks-empty") { StatusText(if (state.searching) "No matches." else "No tracks found.") }
+  }
   if (tracks.isNotEmpty() || state.tracks.isNotEmpty()) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-      AppButton(
-        text = "Play all",
-        onClick = { onPlayAll(tracks) },
-        enabled = tracks.isNotEmpty(),
-        modifier = Modifier.weight(1f),
-      )
-      AppButton(
-        text = "Download",
-        onClick = { onDownloadTracks(state.tracks) },
-        enabled = state.tracks.isNotEmpty(),
-        modifier = Modifier.weight(1f),
-      )
+    item(key = "track-actions") {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        AppButton(
+          text = "Play all",
+          onClick = { onPlayAll(tracks) },
+          enabled = tracks.isNotEmpty(),
+          modifier = Modifier.weight(1f),
+        )
+        AppButton(
+          text = "Download",
+          onClick = { onDownloadTracks(state.tracks) },
+          enabled = state.tracks.isNotEmpty(),
+          modifier = Modifier.weight(1f),
+        )
+      }
     }
   }
-  tracks.forEach { track ->
+  items(tracks, key = { it.ratingKey }) { track ->
     TrackRow(
       credentials = state.credentials,
       track = track,
@@ -735,6 +800,13 @@ private fun BrowseItem.browseRowIcon(): RowIcon = when (this) {
   is BrowseItem.AlbumItem -> RowIcon.Album
   is BrowseItem.PlaylistItem -> RowIcon.Playlist
   is BrowseItem.TrackItem -> RowIcon.Track
+}
+
+private fun BrowseItem.browseStableKey(): String = when (this) {
+  is BrowseItem.LibraryItem -> "library-${library.key}"
+  is BrowseItem.AlbumItem -> "album-${album.key}"
+  is BrowseItem.PlaylistItem -> "playlist-${playlist.key}"
+  is BrowseItem.TrackItem -> "track-${track.ratingKey}"
 }
 
 private enum class RowIcon {

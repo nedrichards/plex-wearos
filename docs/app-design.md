@@ -155,6 +155,14 @@ machine identifier and maps music/video session types to Plex control types.
 The current UI exposes only play/pause for active sessions. That keeps remote
 control useful without turning the watch app into a full Plex remote.
 
+## Future work
+
+- Add paged or indexed Plex browsing for large libraries. The current browse
+  cache and lazy list avoid repeated work after a view has loaded, but the first
+  visit to a large album library still fetches and parses the whole Plex
+  response. Prefer a server-backed paging or alphabet/index flow so the watch
+  can show the first useful rows quickly and load more on demand.
+
 ## Launcher icon
 
 The app uses adaptive launcher resources for current Android versions:

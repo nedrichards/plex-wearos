@@ -540,6 +540,7 @@ class PlexWearViewModel(
       authJob?.cancel()
       authJob = null
       authStore.clear()
+      repository.clearCache()
       authStore.seedDebugCredentialsIfNeeded()
       val credentials = authStore.credentials.first()
       _uiState.update {
