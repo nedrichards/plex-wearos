@@ -55,6 +55,26 @@ class PlexWearUiStateTest {
     assertFalse(last.canPlayNext)
   }
 
+  @Test
+  fun topLevelActions_keepGlobalNavigationAboveScreenContent() {
+    assertEquals(emptyList<TopLevelAction>(), PlexWearUiState(screen = Screen.Home).topLevelActions())
+
+    assertEquals(
+      listOf(TopLevelAction.NowPlaying),
+      PlexWearUiState(screen = Screen.Home, nowPlaying = track()).topLevelActions(),
+    )
+
+    assertEquals(
+      listOf(TopLevelAction.Home),
+      PlexWearUiState(screen = Screen.NowPlaying, nowPlaying = track()).topLevelActions(),
+    )
+
+    assertEquals(
+      listOf(TopLevelAction.Home, TopLevelAction.NowPlaying),
+      PlexWearUiState(screen = Screen.Tracks, nowPlaying = track()).topLevelActions(),
+    )
+  }
+
   private fun track(ratingKey: String = "1"): PlexTrack = PlexTrack(
     ratingKey = ratingKey,
     key = "/library/metadata/$ratingKey",

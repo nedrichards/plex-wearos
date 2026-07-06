@@ -35,6 +35,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -186,26 +188,61 @@ private fun PlexWearScreen(
       return@Column
     }
 
-    if (state.canOpenCurrentPlayback) {
-      AppButton(text = "Now playing", onClick = onCurrentPlayback)
-    }
+    TopLevelActions(state, onHome, onCurrentPlayback)
 
     when (state.screen) {
       Screen.Home -> HomeContent(state, onItemClick, onPlay, onPlaylists, onSessions, onSettings)
-      Screen.Albums, Screen.Playlists -> BrowseContent(state, onItemClick, onHome, onSearch, onClearSearch)
+      Screen.Albums, Screen.Playlists -> BrowseContent(state, onItemClick, onSearch, onClearSearch)
       Screen.Tracks -> TracksContent(
         state,
         onSelectTrack,
         onPlayAll,
         onDownloadTracks,
-        onHome,
         onSearch,
         onClearSearch,
       )
-      Screen.Track -> TrackContent(state, onPlay, onDownloadTrack, onTrackList, onHome)
-      Screen.NowPlaying -> NowPlayingContent(state, onTogglePlayback, onPrevious, onNext, onHome)
-      Screen.Sessions -> SessionsContent(state, onToggleSessionPlayback, onSessions, onHome)
-      Screen.Settings -> SettingsContent(state, onHome, onReset, onCycleOfflineQuality, onClearOfflineCache)
+      Screen.Track -> TrackContent(state, onPlay, onDownloadTrack, onTrackList)
+      Screen.NowPlaying -> NowPlayingContent(state, onTogglePlayback, onPrevious, onNext)
+      Screen.Sessions -> SessionsContent(state, onToggleSessionPlayback, onSessions)
+      Screen.Settings -> SettingsContent(state, onReset, onCycleOfflineQuality, onClearOfflineCache)
+    }
+  }
+}
+
+@Composable
+private fun TopLevelActions(
+  state: PlexWearUiState,
+  onHome: () -> Unit,
+  onCurrentPlayback: () -> Unit,
+) {
+  val actions = state.topLevelActions()
+  when (actions.size) {
+    0 -> Unit
+    1 -> AppButton(
+      text = actions.single().label,
+      onClick = {
+        when (actions.single()) {
+          TopLevelAction.Home -> onHome()
+          TopLevelAction.NowPlaying -> onCurrentPlayback()
+        }
+      },
+    )
+    else -> Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      actions.forEach { action ->
+        AppButton(
+          text = action.label,
+          onClick = {
+            when (action) {
+              TopLevelAction.Home -> onHome()
+              TopLevelAction.NowPlaying -> onCurrentPlayback()
+            }
+          },
+          modifier = Modifier.weight(1f),
+        )
+      }
     }
   }
 }
@@ -249,16 +286,14 @@ private fun SessionsContent(
   state: PlexWearUiState,
   onToggleSessionPlayback: (PlexSession) -> Unit,
   onRefresh: () -> Unit,
-  onHome: () -> Unit,
 ) {
+  AppButton(text = "Refresh", onClick = onRefresh)
   if (state.sessions.isEmpty()) {
     StatusText("No active streams.")
   }
   state.sessions.forEach { session ->
     SessionRow(session = session, onTogglePlayback = { onToggleSessionPlayback(session) })
   }
-  AppButton(text = "Refresh", onClick = onRefresh)
-  AppButton(text = "Home", onClick = onHome)
 }
 
 @Composable
@@ -290,7 +325,6 @@ private fun OnboardingContent(
 private fun BrowseContent(
   state: PlexWearUiState,
   onItemClick: (BrowseItem) -> Unit,
-  onHome: () -> Unit,
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
 ) {
@@ -298,7 +332,6 @@ private fun BrowseContent(
   SearchControls(state.searchQuery, onSearch, onClearSearch)
   if (items.isEmpty()) StatusText(if (state.searching) "No matches." else "Nothing found.")
   items.forEach { item -> BrowseRow(state.credentials, item, onItemClick) }
-  AppButton(text = "Home", onClick = onHome)
 }
 
 @Composable
@@ -307,16 +340,30 @@ private fun TracksContent(
   onSelectTrack: (PlexTrack) -> Unit,
   onPlayAll: (List<PlexTrack>) -> Unit,
   onDownloadTracks: (List<PlexTrack>) -> Unit,
-  onHome: () -> Unit,
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
 ) {
   val tracks = filterTracks(state.tracks, state.searchQuery)
   SearchControls(state.searchQuery, onSearch, onClearSearch)
   if (tracks.isEmpty()) StatusText(if (state.searching) "No matches." else "No tracks found.")
-  if (tracks.isNotEmpty()) AppButton(text = "Play all", onClick = { onPlayAll(tracks) })
-  if (state.tracks.isNotEmpty()) {
-    AppButton(text = "Download all", onClick = { onDownloadTracks(state.tracks) })
+  if (tracks.isNotEmpty() || state.tracks.isNotEmpty()) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      AppButton(
+        text = "Play all",
+        onClick = { onPlayAll(tracks) },
+        enabled = tracks.isNotEmpty(),
+        modifier = Modifier.weight(1f),
+      )
+      AppButton(
+        text = "Download",
+        onClick = { onDownloadTracks(state.tracks) },
+        enabled = state.tracks.isNotEmpty(),
+        modifier = Modifier.weight(1f),
+      )
+    }
   }
   tracks.forEach { track ->
     TrackRow(
@@ -326,7 +373,6 @@ private fun TracksContent(
       offlineStatus = state.offlineStatus(track),
     )
   }
-  AppButton(text = "Home", onClick = onHome)
 }
 
 @Composable
@@ -335,7 +381,6 @@ private fun TrackContent(
   onPlay: (PlexTrack) -> Unit,
   onDownloadTrack: (PlexTrack) -> Unit,
   onTrackList: () -> Unit,
-  onHome: () -> Unit,
 ) {
   val track = state.selectedTrack
   if (track == null) {
@@ -353,7 +398,6 @@ private fun TrackContent(
     AppButton(text = "Download ${state.offlineQuality.bitrateKbps}k", onClick = { onDownloadTrack(track) })
   }
   AppButton(text = "Tracks", onClick = onTrackList)
-  AppButton(text = "Home", onClick = onHome)
 }
 
 @Composable
@@ -362,11 +406,33 @@ private fun SearchControls(
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
 ) {
-  if (query.isNotBlank()) {
-    StatusText("Search: $query")
-    AppButton(text = "Clear search", onClick = onClearSearch)
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    if (query.isNotBlank()) {
+      Text(
+        text = "Search: $query",
+        modifier = Modifier.weight(1f),
+        style = MaterialTheme.typography.bodySmall,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      IconActionButton(
+        icon = ActionIcon.Clear,
+        label = "Clear search",
+        onClick = onClearSearch,
+      )
+    } else {
+      Spacer(Modifier.weight(1f))
+    }
+    IconActionButton(
+      icon = ActionIcon.Search,
+      label = "Search",
+      onClick = onSearch,
+    )
   }
-  AppButton(text = "Search", onClick = onSearch)
 }
 
 @Composable
@@ -375,7 +441,6 @@ private fun NowPlayingContent(
   onTogglePlayback: () -> Unit,
   onPrevious: () -> Unit,
   onNext: () -> Unit,
-  onHome: () -> Unit,
 ) {
   state.nowPlayingContext?.let {
     Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -405,13 +470,11 @@ private fun NowPlayingContent(
       modifier = Modifier.weight(1f),
     )
   }
-  AppButton(text = "Home", onClick = onHome)
 }
 
 @Composable
 private fun SettingsContent(
   state: PlexWearUiState,
-  onHome: () -> Unit,
   onReset: () -> Unit,
   onCycleOfflineQuality: () -> Unit,
   onClearOfflineCache: () -> Unit,
@@ -424,7 +487,6 @@ private fun SettingsContent(
     StatusText("Debug builds still seed plex.serverUrl and plex.token when local.properties is set.")
   }
   AppButton(text = "Reset auth", onClick = onReset)
-  AppButton(text = "Home", onClick = onHome)
 }
 
 @Composable
@@ -577,6 +639,29 @@ private fun IconBadge(
 }
 
 @Composable
+private fun IconActionButton(
+  icon: ActionIcon,
+  label: String,
+  onClick: () -> Unit,
+) {
+  val foreground = MaterialTheme.colorScheme.onSecondaryContainer
+  Button(
+    onClick = onClick,
+    modifier = Modifier
+      .size(40.dp)
+      .semantics { contentDescription = label },
+    colors = ButtonDefaults.filledTonalButtonColors(),
+  ) {
+    Canvas(Modifier.size(18.dp)) {
+      when (icon) {
+        ActionIcon.Search -> drawSearchIcon(foreground)
+        ActionIcon.Clear -> drawClearIcon(foreground)
+      }
+    }
+  }
+}
+
+@Composable
 private fun AppButton(
   text: String,
   onClick: () -> Unit,
@@ -658,6 +743,21 @@ private enum class RowIcon {
   Playlist,
   Settings,
   Track,
+}
+
+private enum class ActionIcon {
+  Clear,
+  Search,
+}
+
+internal enum class TopLevelAction(val label: String) {
+  Home("Home"),
+  NowPlaying("Now playing"),
+}
+
+internal fun PlexWearUiState.topLevelActions(): List<TopLevelAction> = buildList {
+  if (screen != Screen.Home) add(TopLevelAction.Home)
+  if (canOpenCurrentPlayback) add(TopLevelAction.NowPlaying)
 }
 
 private fun DrawScope.drawAlbumIcon(color: Color) {
@@ -759,6 +859,41 @@ private fun DrawScope.drawTrackIcon(color: Color) {
     radius = size.minDimension * 0.14f,
     center = Offset(size.width * 0.42f, size.height * 0.7f),
     style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+  )
+}
+
+private fun DrawScope.drawSearchIcon(color: Color) {
+  val strokeWidth = size.minDimension * 0.12f
+  drawCircle(
+    color = color,
+    radius = size.minDimension * 0.28f,
+    center = Offset(size.width * 0.43f, size.height * 0.43f),
+    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+  )
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.62f, size.height * 0.62f),
+    end = Offset(size.width * 0.82f, size.height * 0.82f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+}
+
+private fun DrawScope.drawClearIcon(color: Color) {
+  val strokeWidth = size.minDimension * 0.12f
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.28f, size.height * 0.28f),
+    end = Offset(size.width * 0.72f, size.height * 0.72f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
+  )
+  drawLine(
+    color = color,
+    start = Offset(size.width * 0.72f, size.height * 0.28f),
+    end = Offset(size.width * 0.28f, size.height * 0.72f),
+    strokeWidth = strokeWidth,
+    cap = StrokeCap.Round,
   )
 }
 
