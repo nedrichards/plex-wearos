@@ -79,7 +79,7 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background),
+        .background(AppBackground),
     ) {
       TimeText()
       PlexWearScreen(
@@ -155,6 +155,7 @@ private fun PlexWearScreen(
   val filteredTracks = remember(state.tracks, state.searchQuery) {
     filterTracks(state.tracks, state.searchQuery)
   }
+  val showTitle = state.showScreenTitle()
 
   LaunchedEffect(state.screen, state.title) {
     focusRequester.requestFocus()
@@ -172,17 +173,19 @@ private fun PlexWearScreen(
         true
       }
       .focusable(),
-    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 26.dp),
+    contentPadding = PaddingValues(start = 10.dp, top = 22.dp, end = 10.dp, bottom = 14.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.spacedBy(8.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
-    item(key = "title") {
-      Text(
-        text = state.title,
-        style = MaterialTheme.typography.titleMedium,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
+    if (showTitle) {
+      item(key = "title") {
+        Text(
+          text = state.title,
+          style = MaterialTheme.typography.titleMedium,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
     }
 
     if (state.loading) {
@@ -251,7 +254,7 @@ private fun ListItemGroup(content: @Composable () -> Unit) {
   Column(
     modifier = Modifier.fillMaxWidth(),
     horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.spacedBy(8.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
     content()
   }
@@ -867,6 +870,9 @@ internal fun PlexWearUiState.topLevelActions(): List<TopLevelAction> = buildList
   if (canOpenCurrentPlayback) add(TopLevelAction.NowPlaying)
 }
 
+private fun PlexWearUiState.showScreenTitle(): Boolean =
+  loading || !configured || screen != Screen.Home
+
 private fun DrawScope.drawAlbumIcon(color: Color) {
   val stroke = Stroke(width = size.minDimension * 0.1f, cap = StrokeCap.Round)
   drawCircle(
@@ -1134,6 +1140,7 @@ private fun Long.formatDuration(): String {
 }
 
 private const val KEY_SEARCH_QUERY = "plex_search_query"
+private val AppBackground = Color.Black
 
 private fun searchInputIntent() = RemoteInputIntentHelper.createActionRemoteInputIntent().apply {
   val remoteInputs = listOf(
