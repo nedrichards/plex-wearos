@@ -7,6 +7,7 @@ import com.nedrichards.plexwear.auth.PlexAuthClient
 import com.nedrichards.plexwear.auth.PlexAuthStore
 import com.nedrichards.plexwear.auth.PlexCredentials
 import com.nedrichards.plexwear.data.BrowseItem
+import com.nedrichards.plexwear.data.BROWSE_PAGE_SIZE
 import com.nedrichards.plexwear.data.PlexAlbum
 import com.nedrichards.plexwear.data.PlexLibrary
 import com.nedrichards.plexwear.data.PlexPlaylist
@@ -24,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -57,6 +59,8 @@ data class PlexWearUiState(
   val downloadedTrackQualities: Map<String, OfflineQuality> = emptyMap(),
   val downloadingTrackIds: Set<String> = emptySet(),
   val offlineCacheBytes: Long = 0,
+  val loadingMore: Boolean = false,
+  val canLoadMore: Boolean = false,
   val screen: Screen = Screen.Home,
 ) {
   val configured: Boolean = credentials.isConfigured
@@ -89,6 +93,8 @@ class PlexWearViewModel(
 ) : AndroidViewModel(application) {
   private val playbackController = PlaybackController(application)
   private var authJob: Job? = null
+  private var pageSource: PageSource? = null
+  private val backStack = ArrayDeque<NavigationDestination>()
   private val _uiState = MutableStateFlow(PlexWearUiState())
   val uiState: StateFlow<PlexWearUiState> = _uiState.asStateFlow()
 
@@ -112,6 +118,20 @@ class PlexWearViewModel(
       }
     }
     viewModelScope.launch {
+      playbackController.state.collect { playback ->
+        _uiState.update { current ->
+          val queuedTrack = current.nowPlayingQueue.getOrNull(playback.mediaItemIndex)
+          current.copy(
+            nowPlaying = queuedTrack ?: current.nowPlaying,
+            nowPlayingIndex = playback.mediaItemIndex.takeIf { it in current.nowPlayingQueue.indices }
+              ?: current.nowPlayingIndex,
+            playbackPaused = current.nowPlaying != null && !playback.isPlaying,
+            error = playback.errorMessage ?: current.error,
+          )
+        }
+      }
+    }
+    viewModelScope.launch {
       authStore.seedDebugCredentialsIfNeeded()
       val credentials = authStore.credentials.first()
       _uiState.update { it.copy(credentials = credentials, loading = false) }
@@ -120,7 +140,9 @@ class PlexWearViewModel(
   }
 
   fun loadHome() {
+    backStack.clear()
     withCredentials { credentials ->
+      pageSource = null
       _uiState.update {
         it.copy(
           screen = Screen.Home,
@@ -130,6 +152,8 @@ class PlexWearViewModel(
           searchQuery = "",
           trackListTitle = null,
           selectedTrack = null,
+          loadingMore = false,
+          canLoadMore = false,
         )
       }
       val libraries = repository.musicLibraries(credentials).map(BrowseItem::LibraryItem)
@@ -146,43 +170,17 @@ class PlexWearViewModel(
   }
 
   fun loadAlbums(library: PlexLibrary) {
-    withCredentials { credentials ->
-      _uiState.update {
-        it.copy(
-          screen = Screen.Albums,
-          title = library.title,
-          loading = true,
-          error = null,
-          searchQuery = "",
-          trackListTitle = null,
-          selectedTrack = null,
-        )
-      }
-      val albums = repository.albums(credentials, library).map(BrowseItem::AlbumItem)
-      _uiState.update { it.copy(items = albums, tracks = emptyList(), loading = false) }
-    }
+    loadFirstPage(PageSource.Albums(library), Screen.Albums, library.title)
   }
 
   fun loadPlaylists() {
-    withCredentials { credentials ->
-      _uiState.update {
-        it.copy(
-          screen = Screen.Playlists,
-          title = "Playlists",
-          loading = true,
-          error = null,
-          searchQuery = "",
-          trackListTitle = null,
-          selectedTrack = null,
-        )
-      }
-      val playlists = repository.playlists(credentials).map(BrowseItem::PlaylistItem)
-      _uiState.update { it.copy(items = playlists, tracks = emptyList(), loading = false) }
-    }
+    loadFirstPage(PageSource.Playlists, Screen.Playlists, "Playlists")
   }
 
   fun loadSessions() {
     withCredentials { credentials ->
+      pushCurrentDestination()
+      pageSource = null
       _uiState.update {
         it.copy(
           screen = Screen.Sessions,
@@ -208,42 +206,36 @@ class PlexWearViewModel(
   }
 
   fun loadAlbumTracks(album: PlexAlbum) {
-    withCredentials { credentials ->
-      _uiState.update {
-        it.copy(
-          screen = Screen.Tracks,
-          title = album.title,
-          loading = true,
-          error = null,
-          searchQuery = "",
-          trackListTitle = album.title,
-          selectedTrack = null,
-        )
-      }
-      val tracks = repository.tracksForAlbum(credentials, album)
-      _uiState.update { it.copy(items = emptyList(), tracks = tracks, loading = false) }
-    }
+    loadFirstPage(PageSource.AlbumTracks(album), Screen.Tracks, album.title)
   }
 
   fun loadPlaylistTracks(playlist: PlexPlaylist) {
+    loadFirstPage(PageSource.PlaylistTracks(playlist), Screen.Tracks, playlist.title)
+  }
+
+  fun loadMore() {
+    val source = pageSource ?: return
+    if (_uiState.value.loading || _uiState.value.loadingMore || !_uiState.value.canLoadMore) return
     withCredentials { credentials ->
-      _uiState.update {
-        it.copy(
-          screen = Screen.Tracks,
-          title = playlist.title,
-          loading = true,
-          error = null,
-          searchQuery = "",
-          trackListTitle = playlist.title,
-          selectedTrack = null,
+      val start = when (source) {
+        is PageSource.Albums, PageSource.Playlists -> _uiState.value.items.size
+        is PageSource.AlbumTracks, is PageSource.PlaylistTracks -> _uiState.value.tracks.size
+      }
+      _uiState.update { it.copy(loadingMore = true, error = null) }
+      val page = loadPage(credentials, source, start)
+      _uiState.update { current ->
+        current.copy(
+          items = current.items + page.items,
+          tracks = current.tracks + page.tracks,
+          loadingMore = false,
+          canLoadMore = page.isFull,
         )
       }
-      val tracks = repository.tracksForPlaylist(credentials, playlist)
-      _uiState.update { it.copy(items = emptyList(), tracks = tracks, loading = false) }
     }
   }
 
   fun openTrack(track: PlexTrack) {
+    pushCurrentDestination()
     _uiState.update {
       it.copy(
         screen = Screen.Track,
@@ -282,6 +274,7 @@ class PlexWearViewModel(
         ),
       )
       autoCacheTracks(credentials, listOf(track), quality)
+      pushCurrentDestination()
       _uiState.update {
         it.copy(
           screen = Screen.NowPlaying,
@@ -315,6 +308,7 @@ class PlexWearViewModel(
         },
       )
       autoCacheTracks(credentials, tracks, quality)
+      pushCurrentDestination()
       _uiState.update {
         it.copy(
           screen = Screen.NowPlaying,
@@ -334,25 +328,27 @@ class PlexWearViewModel(
   }
 
   fun openCurrentPlayback() {
-    _uiState.update {
-      if (it.nowPlaying == null) {
-        it
-      } else {
-        it.copy(screen = Screen.NowPlaying, title = "Now playing", error = null, searchQuery = "")
-      }
+    if (_uiState.value.nowPlaying == null || _uiState.value.screen == Screen.NowPlaying) return
+    pushCurrentDestination()
+    _uiState.update { it.copy(screen = Screen.NowPlaying, title = "Now playing", error = null, searchQuery = "") }
+  }
+
+  fun navigateBack() {
+    if (backStack.isEmpty()) {
+      loadHome()
+      return
     }
+    val destination = backStack.removeLast()
+    pageSource = destination.pageSource
+    _uiState.value = destination.state.copy(error = null, loading = false, loadingMore = false)
   }
 
   fun togglePlayback() {
     viewModelScope.launch {
-      val paused = _uiState.value.playbackPaused
-      if (paused) {
+      if (_uiState.value.playbackPaused) {
         playbackController.resume()
       } else {
         playbackController.pause()
-      }
-      _uiState.update {
-        if (it.nowPlaying == null) it else it.copy(playbackPaused = !paused, error = null)
       }
     }
   }
@@ -364,18 +360,6 @@ class PlexWearViewModel(
       if (previousIndex !in state.nowPlayingQueue.indices) return@launch
 
       playbackController.skipToPrevious()
-      _uiState.update {
-        if (it.nowPlayingQueue.indices.contains(previousIndex)) {
-          it.copy(
-            nowPlaying = it.nowPlayingQueue[previousIndex],
-            nowPlayingIndex = previousIndex,
-            playbackPaused = false,
-            error = null,
-          )
-        } else {
-          it
-        }
-      }
     }
   }
 
@@ -386,18 +370,6 @@ class PlexWearViewModel(
       if (nextIndex !in state.nowPlayingQueue.indices) return@launch
 
       playbackController.skipToNext()
-      _uiState.update {
-        if (it.nowPlayingQueue.indices.contains(nextIndex)) {
-          it.copy(
-            nowPlaying = it.nowPlayingQueue[nextIndex],
-            nowPlayingIndex = nextIndex,
-            playbackPaused = false,
-            error = null,
-          )
-        } else {
-          it
-        }
-      }
     }
   }
 
@@ -438,6 +410,7 @@ class PlexWearViewModel(
   }
 
   fun openSettings() {
+    pushCurrentDestination()
     _uiState.update {
       it.copy(
         screen = Screen.Settings,
@@ -541,6 +514,8 @@ class PlexWearViewModel(
       authJob = null
       authStore.clear()
       repository.clearCache()
+      pageSource = null
+      backStack.clear()
       authStore.seedDebugCredentialsIfNeeded()
       val credentials = authStore.credentials.first()
       _uiState.update {
@@ -563,6 +538,8 @@ class PlexWearViewModel(
           error = null,
           auth = PlexAuthUiState(),
           searchQuery = "",
+          loadingMore = false,
+          canLoadMore = false,
         )
       }
       if (credentials.isConfigured) loadHome()
@@ -610,6 +587,71 @@ class PlexWearViewModel(
       }
     }
   }
+
+  private fun loadFirstPage(source: PageSource, screen: Screen, title: String) {
+    withCredentials { credentials ->
+      pushCurrentDestination()
+      pageSource = source
+      _uiState.update {
+        it.copy(
+          screen = screen,
+          title = title,
+          items = emptyList(),
+          tracks = emptyList(),
+          loading = true,
+          loadingMore = false,
+          canLoadMore = false,
+          error = null,
+          searchQuery = "",
+          trackListTitle = title.takeIf { screen == Screen.Tracks },
+          selectedTrack = null,
+        )
+      }
+      val page = loadPage(credentials, source, start = 0)
+      _uiState.update {
+        it.copy(
+          items = page.items,
+          tracks = page.tracks,
+          loading = false,
+          canLoadMore = page.isFull,
+        )
+      }
+    }
+  }
+
+  private suspend fun loadPage(
+    credentials: PlexCredentials,
+    source: PageSource,
+    start: Int,
+  ): BrowsePage = when (source) {
+    is PageSource.Albums -> BrowsePage(items = repository.albums(credentials, source.library, start).map(BrowseItem::AlbumItem))
+    PageSource.Playlists -> BrowsePage(items = repository.playlists(credentials, start).map(BrowseItem::PlaylistItem))
+    is PageSource.AlbumTracks -> BrowsePage(tracks = repository.tracksForAlbum(credentials, source.album, start))
+    is PageSource.PlaylistTracks -> BrowsePage(tracks = repository.tracksForPlaylist(credentials, source.playlist, start))
+  }
+
+  private sealed interface PageSource {
+    data class Albums(val library: PlexLibrary) : PageSource
+    data object Playlists : PageSource
+    data class AlbumTracks(val album: PlexAlbum) : PageSource
+    data class PlaylistTracks(val playlist: PlexPlaylist) : PageSource
+  }
+
+  private data class BrowsePage(
+    val items: List<BrowseItem> = emptyList(),
+    val tracks: List<PlexTrack> = emptyList(),
+  ) {
+    val isFull: Boolean = (items.size + tracks.size) == BROWSE_PAGE_SIZE
+  }
+
+  private fun pushCurrentDestination() {
+    backStack.addLast(NavigationDestination(_uiState.value, pageSource))
+  }
+
+  private data class NavigationDestination(
+    val state: PlexWearUiState,
+    val pageSource: PageSource?,
+  )
 
   private companion object {
     const val PIN_POLL_INTERVAL_MS = 3_000L

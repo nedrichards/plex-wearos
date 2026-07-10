@@ -7,6 +7,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+internal const val BROWSE_PAGE_SIZE = 50
+
 internal typealias PlexFetch = suspend (
   credentials: PlexCredentials,
   path: String,
@@ -34,22 +36,44 @@ class PlexRepository internal constructor(private val fetch: PlexFetch) {
       parser = PlexXmlParser::tracks,
     )
 
-  suspend fun albums(credentials: PlexCredentials, library: PlexLibrary): List<PlexAlbum> =
-    cachedParsed(credentials, "/library/sections/${library.key}/albums", parser = PlexXmlParser::albums)
+  suspend fun albums(
+    credentials: PlexCredentials,
+    library: PlexLibrary,
+    start: Int = 0,
+    pageSize: Int = BROWSE_PAGE_SIZE,
+  ): List<PlexAlbum> = cachedParsed(
+    credentials = credentials,
+    path = "/library/sections/${library.key}/albums",
+    query = pageQuery(start, pageSize),
+    parser = PlexXmlParser::albums,
+  )
 
-  suspend fun playlists(credentials: PlexCredentials): List<PlexPlaylist> =
-    cachedParsed(
-      credentials = credentials,
-      path = "/playlists",
-      query = mapOf("playlistType" to "audio"),
-      parser = PlexXmlParser::playlists,
-    )
+  suspend fun playlists(
+    credentials: PlexCredentials,
+    start: Int = 0,
+    pageSize: Int = BROWSE_PAGE_SIZE,
+  ): List<PlexPlaylist> = cachedParsed(
+    credentials = credentials,
+    path = "/playlists",
+    query = mapOf("playlistType" to "audio") + pageQuery(start, pageSize),
+    parser = PlexXmlParser::playlists,
+  )
 
-  suspend fun tracksForAlbum(credentials: PlexCredentials, album: PlexAlbum): List<PlexTrack> =
-    cachedParsed(credentials, album.key, parser = PlexXmlParser::tracks)
+  suspend fun tracksForAlbum(
+    credentials: PlexCredentials,
+    album: PlexAlbum,
+    start: Int = 0,
+    pageSize: Int = BROWSE_PAGE_SIZE,
+  ): List<PlexTrack> =
+    cachedParsed(credentials, album.key, pageQuery(start, pageSize), PlexXmlParser::tracks)
 
-  suspend fun tracksForPlaylist(credentials: PlexCredentials, playlist: PlexPlaylist): List<PlexTrack> =
-    cachedParsed(credentials, playlist.key, parser = PlexXmlParser::tracks)
+  suspend fun tracksForPlaylist(
+    credentials: PlexCredentials,
+    playlist: PlexPlaylist,
+    start: Int = 0,
+    pageSize: Int = BROWSE_PAGE_SIZE,
+  ): List<PlexTrack> =
+    cachedParsed(credentials, playlist.key, pageQuery(start, pageSize), PlexXmlParser::tracks)
 
   suspend fun activeSessions(credentials: PlexCredentials): List<PlexSession> {
     val body = fetch(credentials, "/status/sessions", emptyMap(), emptyMap())
@@ -97,6 +121,11 @@ class PlexRepository internal constructor(private val fetch: PlexFetch) {
 
   private suspend fun <T> parse(block: () -> T): T =
     withContext(Dispatchers.Default) { block() }
+
+  private fun pageQuery(start: Int, pageSize: Int): Map<String, String> = mapOf(
+    "X-Plex-Container-Start" to start.coerceAtLeast(0).toString(),
+    "X-Plex-Container-Size" to pageSize.coerceAtLeast(1).toString(),
+  )
 
   private data class CacheKey(
     val credentials: String,

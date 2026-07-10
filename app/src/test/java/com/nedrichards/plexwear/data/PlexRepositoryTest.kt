@@ -60,6 +60,24 @@ class PlexRepositoryTest {
     assertEquals("6", query["X-Plex-Container-Size"])
   }
 
+  @Test
+  fun albums_requestsTheNextServerPageWithItsOwnCacheKey() = runTest {
+    val queries = mutableListOf<Map<String, String>>()
+    val repository = PlexRepository { _, _, query, _ ->
+      queries += query
+      albumsXml("Album ${queries.size}")
+    }
+    val library = PlexLibrary(key = "1", title = "Music", type = "artist")
+
+    repository.albums(credentials, library, start = 0, pageSize = 50)
+    repository.albums(credentials, library, start = 50, pageSize = 50)
+
+    assertEquals("0", queries[0]["X-Plex-Container-Start"])
+    assertEquals("50", queries[0]["X-Plex-Container-Size"])
+    assertEquals("50", queries[1]["X-Plex-Container-Start"])
+    assertEquals(2, queries.size)
+  }
+
   private fun albumsXml(title: String): String = """
     <MediaContainer>
       <Directory

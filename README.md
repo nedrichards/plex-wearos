@@ -41,7 +41,8 @@ playlist lists do not hide the way back at the bottom.
 
 Album, playlist, and browse screens expose a compact search icon rather than a
 full-width search row. Search filters loaded rows locally and matches album,
-playlist, track, artist, and album text where available.
+playlist, track, artist, and album text where available. Browse views load 50
+rows at a time and automatically request the next page near the end of a list.
 
 ## Plex sign-in
 

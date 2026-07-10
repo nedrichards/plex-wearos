@@ -11,9 +11,29 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+data class PlaybackState(
+  val isPlaying: Boolean = false,
+  val mediaItemIndex: Int = -1,
+  val errorMessage: String? = null,
+)
 
 class PlaybackController(private val context: Context) {
   private var controller: MediaController? = null
+  private val _state = MutableStateFlow(PlaybackState())
+  val state: StateFlow<PlaybackState> = _state.asStateFlow()
+  private val playerListener = object : Player.Listener {
+    override fun onEvents(player: Player, events: Player.Events) {
+      _state.value = PlaybackState(
+        isPlaying = player.isPlaying,
+        mediaItemIndex = player.currentMediaItemIndex,
+        errorMessage = player.playerError?.message,
+      )
+    }
+  }
 
   suspend fun play(plan: PlexPlaybackPlan) {
     play(listOf(plan))
@@ -22,16 +42,16 @@ class PlaybackController(private val context: Context) {
   suspend fun play(plans: List<PlexPlaybackPlan>) {
     if (plans.isEmpty()) return
     val mediaController = controller ?: connect().also { controller = it }
-    val prepared = mediaController.prepareAndPlay(plans.map { it.primary })
-    if (!prepared) {
-      val maxFallbacks = plans.maxOf { it.fallbacks.size }
-      for (fallbackIndex in 0 until maxFallbacks) {
-        val fallbackPrepared = mediaController.prepareAndPlay(
-          plans.map { it.fallbacks.getOrNull(fallbackIndex) ?: it.primary },
-        )
-        if (fallbackPrepared) return
-      }
+    if (mediaController.prepareAndPlay(plans.map { it.primary })) return
+
+    val maxFallbacks = plans.maxOf { it.fallbacks.size }
+    for (fallbackIndex in 0 until maxFallbacks) {
+      val fallbackPrepared = mediaController.prepareAndPlay(
+        plans.map { it.fallbacks.getOrNull(fallbackIndex) ?: it.primary },
+      )
+      if (fallbackPrepared) return
     }
+    error("Playback could not start")
   }
 
   suspend fun resume() {
@@ -70,10 +90,10 @@ class PlaybackController(private val context: Context) {
         while (playbackState != Player.STATE_READY && playerError == null) {
           kotlinx.coroutines.delay(50)
         }
-        playbackState == Player.STATE_READY && playerError == null
+        playbackStartupSucceeded(playbackState, playerError != null)
       }
     } catch (_: TimeoutCancellationException) {
-      true
+      false
     } finally {
       removeListener(listener)
     }
@@ -81,11 +101,23 @@ class PlaybackController(private val context: Context) {
 
   private suspend fun connect(): MediaController = withContext(Dispatchers.IO) {
     val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-    MediaController.Builder(context, token).buildAsync().get()
+    MediaController.Builder(context, token).buildAsync().get().also { mediaController ->
+      mediaController.addListener(playerListener)
+      _state.value = PlaybackState(
+        isPlaying = mediaController.isPlaying,
+        mediaItemIndex = mediaController.currentMediaItemIndex,
+        errorMessage = mediaController.playerError?.message,
+      )
+    }
   }
 
   fun release() {
+    controller?.removeListener(playerListener)
     controller?.release()
     controller = null
+    _state.value = PlaybackState()
   }
 }
+
+internal fun playbackStartupSucceeded(playbackState: Int, hasPlayerError: Boolean): Boolean =
+  playbackState == Player.STATE_READY && !hasPlayerError

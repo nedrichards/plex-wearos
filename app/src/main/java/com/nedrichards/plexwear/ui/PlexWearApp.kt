@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +44,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -59,6 +61,7 @@ import com.nedrichards.plexwear.data.BrowseItem
 import com.nedrichards.plexwear.data.PlexSession
 import com.nedrichards.plexwear.data.PlexTrack
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 
 @Composable
 fun PlexWearApp(viewModel: PlexWearViewModel) {
@@ -85,12 +88,14 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
       PlexWearScreen(
         state = state,
         onHome = viewModel::loadHome,
+        onBack = viewModel::navigateBack,
         onSettings = viewModel::openSettings,
         onReset = viewModel::resetAuth,
         onStartPinAuth = viewModel::startPinAuth,
         onCancelPinAuth = viewModel::cancelPinAuth,
         onSearch = { searchLauncher.launch(searchInputIntent()) },
         onClearSearch = viewModel::clearSearchQuery,
+        onLoadMore = viewModel::loadMore,
         onItemClick = { item ->
           when (item) {
             is BrowseItem.LibraryItem -> viewModel.loadAlbums(item.library)
@@ -123,12 +128,14 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
 private fun PlexWearScreen(
   state: PlexWearUiState,
   onHome: () -> Unit,
+  onBack: () -> Unit,
   onSettings: () -> Unit,
   onReset: () -> Unit,
   onStartPinAuth: () -> Unit,
   onCancelPinAuth: () -> Unit,
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
+  onLoadMore: () -> Unit,
   onItemClick: (BrowseItem) -> Unit,
   onSelectTrack: (PlexTrack) -> Unit,
   onTrackList: () -> Unit,
@@ -157,8 +164,26 @@ private fun PlexWearScreen(
   }
   val showTitle = state.showScreenTitle()
 
+  BackHandler(enabled = state.screen != Screen.Home) { onBack() }
+
   LaunchedEffect(state.screen, state.title) {
     focusRequester.requestFocus()
+  }
+
+  LaunchedEffect(state.screen, state.canLoadMore, state.loadingMore, state.searchQuery) {
+    snapshotFlow {
+      val layout = scrollState.layoutInfo
+      layout.visibleItemsInfo.lastOrNull()?.index to layout.totalItemsCount
+    }.collect { (lastVisibleIndex, totalItems) ->
+      if (
+        state.canLoadMore &&
+        !state.loadingMore &&
+        totalItems > 0 &&
+        (lastVisibleIndex ?: -1) >= totalItems - AUTO_LOAD_THRESHOLD_ITEMS
+      ) {
+        onLoadMore()
+      }
+    }
   }
 
   LazyColumn(
@@ -173,9 +198,9 @@ private fun PlexWearScreen(
         true
       }
       .focusable(),
-    contentPadding = PaddingValues(start = 10.dp, top = 22.dp, end = 10.dp, bottom = 14.dp),
+    contentPadding = PaddingValues(start = 18.dp, top = 34.dp, end = 18.dp, bottom = 24.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.spacedBy(6.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
   ) {
     if (showTitle) {
       item(key = "title") {
@@ -398,6 +423,7 @@ private fun LazyListScope.browseContent(
   items(browseItems, key = { it.browseStableKey() }) { item ->
     BrowseRow(state.credentials, item, onItemClick)
   }
+  loadMoreItem(state)
 }
 
 private fun LazyListScope.tracksContent(
@@ -443,6 +469,13 @@ private fun LazyListScope.tracksContent(
       onPlay = onSelectTrack,
       offlineStatus = state.offlineStatus(track),
     )
+  }
+  loadMoreItem(state)
+}
+
+private fun LazyListScope.loadMoreItem(state: PlexWearUiState) {
+  if (state.loadingMore) {
+    item(key = "load-more-progress") { CircularProgressIndicator(modifier = Modifier.size(28.dp)) }
   }
 }
 
@@ -739,7 +772,7 @@ private fun IconActionButton(
     onClick = onClick,
     enabled = enabled,
     modifier = modifier
-      .size(40.dp)
+      .size(48.dp)
       .semantics { contentDescription = label },
     colors = ButtonDefaults.filledTonalButtonColors(),
   ) {
@@ -1140,6 +1173,7 @@ private fun Long.formatDuration(): String {
 }
 
 private const val KEY_SEARCH_QUERY = "plex_search_query"
+private const val AUTO_LOAD_THRESHOLD_ITEMS = 4
 private val AppBackground = Color.Black
 
 private fun searchInputIntent() = RemoteInputIntentHelper.createActionRemoteInputIntent().apply {
