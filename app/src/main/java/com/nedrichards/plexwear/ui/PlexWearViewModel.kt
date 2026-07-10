@@ -247,21 +247,6 @@ class PlexWearViewModel(
     }
   }
 
-  fun openTrackList() {
-    _uiState.update {
-      if (it.tracks.isEmpty()) {
-        it
-      } else {
-        it.copy(
-          screen = Screen.Tracks,
-          title = it.trackListTitle ?: it.title,
-          selectedTrack = null,
-          error = null,
-        )
-      }
-    }
-  }
-
   fun play(track: PlexTrack) {
     withCredentials { credentials ->
       val quality = _uiState.value.offlineQuality

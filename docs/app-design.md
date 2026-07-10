@@ -82,8 +82,9 @@ Screen routing is intentionally shallow:
 - Active streams -> session list
 - Settings -> auth and offline controls
 
-Global navigation lives above screen content. `Home` and `Now playing` appear at
-the top when relevant, instead of being repeated at the bottom of long lists.
+The system back gesture returns through the loaded app screens. When playback
+is active, a compact Now Playing action appears above relevant content instead
+of a persistent full-width navigation row.
 
 ## List actions
 

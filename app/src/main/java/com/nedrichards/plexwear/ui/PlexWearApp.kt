@@ -43,6 +43,7 @@ import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -87,7 +88,6 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
       TimeText()
       PlexWearScreen(
         state = state,
-        onHome = viewModel::loadHome,
         onBack = viewModel::navigateBack,
         onSettings = viewModel::openSettings,
         onReset = viewModel::resetAuth,
@@ -105,7 +105,6 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
           }
         },
         onSelectTrack = viewModel::openTrack,
-        onTrackList = viewModel::openTrackList,
         onPlay = { viewModel.play(it) },
         onPlayAll = { viewModel.playAll(it) },
         onDownloadTrack = viewModel::downloadTrack,
@@ -127,7 +126,6 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
 @Composable
 private fun PlexWearScreen(
   state: PlexWearUiState,
-  onHome: () -> Unit,
   onBack: () -> Unit,
   onSettings: () -> Unit,
   onReset: () -> Unit,
@@ -138,7 +136,6 @@ private fun PlexWearScreen(
   onLoadMore: () -> Unit,
   onItemClick: (BrowseItem) -> Unit,
   onSelectTrack: (PlexTrack) -> Unit,
-  onTrackList: () -> Unit,
   onPlay: (PlexTrack) -> Unit,
   onPlayAll: (List<PlexTrack>) -> Unit,
   onDownloadTrack: (PlexTrack) -> Unit,
@@ -230,7 +227,7 @@ private fun PlexWearScreen(
       } else {
         if (state.topLevelActions().isNotEmpty()) {
           item(key = "top-level-actions") {
-            TopLevelActions(state, onHome, onCurrentPlayback)
+            TopLevelActions(state, onCurrentPlayback)
           }
         }
 
@@ -254,7 +251,7 @@ private fun PlexWearScreen(
           )
           Screen.Track -> item(key = "track-content") {
             ListItemGroup {
-              TrackContent(state, onPlay, onDownloadTrack, onTrackList)
+              TrackContent(state, onPlay, onDownloadTrack)
             }
           }
           Screen.NowPlaying -> item(key = "now-playing-content") {
@@ -288,38 +285,19 @@ private fun ListItemGroup(content: @Composable () -> Unit) {
 @Composable
 private fun TopLevelActions(
   state: PlexWearUiState,
-  onHome: () -> Unit,
   onCurrentPlayback: () -> Unit,
 ) {
   val actions = state.topLevelActions()
-  when (actions.size) {
-    0 -> Unit
-    1 -> AppButton(
-      text = actions.single().label,
-      onClick = {
-        when (actions.single()) {
-          TopLevelAction.Home -> onHome()
-          TopLevelAction.NowPlaying -> onCurrentPlayback()
-        }
-      },
+  if (actions.isEmpty()) return
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.Center,
+  ) {
+    IconActionButton(
+      icon = ActionIcon.Play,
+      label = actions.single().label,
+      onClick = onCurrentPlayback,
     )
-    else -> Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-      actions.forEach { action ->
-        AppButton(
-          text = action.label,
-          onClick = {
-            when (action) {
-              TopLevelAction.Home -> onHome()
-              TopLevelAction.NowPlaying -> onCurrentPlayback()
-            }
-          },
-          modifier = Modifier.weight(1f),
-        )
-      }
-    }
   }
 }
 
@@ -435,31 +413,23 @@ private fun LazyListScope.tracksContent(
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
 ) {
-  item(key = "search-controls") {
-    SearchControls(state.searchQuery, onSearch, onClearSearch)
+  state.searchQuery.takeIf { it.isNotBlank() }?.let { query ->
+    item(key = "search-query") { StatusText("Search: $query") }
   }
   if (tracks.isEmpty()) {
     item(key = "tracks-empty") { StatusText(if (state.searching) "No matches." else "No tracks found.") }
   }
   if (tracks.isNotEmpty() || state.tracks.isNotEmpty()) {
     item(key = "track-actions") {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-      ) {
-        IconActionButton(
-          icon = ActionIcon.Play,
-          label = "Play all",
-          onClick = { onPlayAll(tracks) },
-          enabled = tracks.isNotEmpty(),
-        )
-        IconActionButton(
-          icon = ActionIcon.Download,
-          label = "Download tracks",
-          onClick = { onDownloadTracks(state.tracks) },
-          enabled = state.tracks.isNotEmpty(),
-        )
-      }
+      TrackListActions(
+        searching = state.searching,
+        onSearch = onSearch,
+        onClearSearch = onClearSearch,
+        onPlayAll = { onPlayAll(tracks) },
+        onDownloadTracks = { onDownloadTracks(state.tracks) },
+        canPlay = tracks.isNotEmpty(),
+        canDownload = state.tracks.isNotEmpty(),
+      )
     }
   }
   items(tracks, key = { it.ratingKey }) { track ->
@@ -484,12 +454,10 @@ private fun TrackContent(
   state: PlexWearUiState,
   onPlay: (PlexTrack) -> Unit,
   onDownloadTrack: (PlexTrack) -> Unit,
-  onTrackList: () -> Unit,
 ) {
   val track = state.selectedTrack
   if (track == null) {
     StatusText("No track selected.")
-    AppButton(text = "Tracks", onClick = onTrackList)
     return
   }
 
@@ -501,16 +469,55 @@ private fun TrackContent(
     modifier = Modifier.fillMaxWidth(),
     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
   ) {
-    IconActionButton(icon = ActionIcon.Play, label = "Play", onClick = { onPlay(track) })
+    IconActionButton(
+      icon = ActionIcon.Play,
+      label = "Play",
+      onClick = { onPlay(track) },
+      size = 48.dp,
+    )
     if (state.downloadedQuality(track) == null && !state.isDownloading(track)) {
       IconActionButton(
         icon = ActionIcon.Download,
         label = "Download ${state.offlineQuality.bitrateKbps}k",
         onClick = { onDownloadTrack(track) },
+        size = 48.dp,
       )
     }
   }
-  AppButton(text = "Tracks", onClick = onTrackList)
+}
+
+@Composable
+private fun TrackListActions(
+  searching: Boolean,
+  onSearch: () -> Unit,
+  onClearSearch: () -> Unit,
+  onPlayAll: () -> Unit,
+  onDownloadTracks: () -> Unit,
+  canPlay: Boolean,
+  canDownload: Boolean,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+  ) {
+    IconActionButton(
+      icon = if (searching) ActionIcon.Clear else ActionIcon.Search,
+      label = if (searching) "Clear search" else "Search",
+      onClick = if (searching) onClearSearch else onSearch,
+    )
+    IconActionButton(
+      icon = ActionIcon.Play,
+      label = "Play all",
+      onClick = onPlayAll,
+      enabled = canPlay,
+    )
+    IconActionButton(
+      icon = ActionIcon.Download,
+      label = "Download tracks",
+      onClick = onDownloadTracks,
+      enabled = canDownload,
+    )
+  }
 }
 
 @Composable
@@ -519,32 +526,35 @@ private fun SearchControls(
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
 ) {
-  Row(
+  Column(
     modifier = Modifier.fillMaxWidth(),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
-    if (query.isNotBlank()) {
+    query.takeIf { it.isNotBlank() }?.let {
       Text(
-        text = "Search: $query",
-        modifier = Modifier.weight(1f),
+        text = "Search: $it",
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
-      IconActionButton(
-        icon = ActionIcon.Clear,
-        label = "Clear search",
-        onClick = onClearSearch,
-      )
-    } else {
-      Spacer(Modifier.weight(1f))
     }
-    IconActionButton(
-      icon = ActionIcon.Search,
-      label = "Search",
-      onClick = onSearch,
-    )
+    Row(
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      if (query.isNotBlank()) {
+        IconActionButton(
+          icon = ActionIcon.Clear,
+          label = "Clear search",
+          onClick = onClearSearch,
+        )
+      }
+      IconActionButton(
+        icon = ActionIcon.Search,
+        label = "Search",
+        onClick = onSearch,
+      )
+    }
   }
 }
 
@@ -762,6 +772,7 @@ private fun IconActionButton(
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
+  size: Dp = 40.dp,
 ) {
   val foreground = if (enabled) {
     MaterialTheme.colorScheme.onSecondaryContainer
@@ -772,7 +783,7 @@ private fun IconActionButton(
     onClick = onClick,
     enabled = enabled,
     modifier = modifier
-      .size(48.dp)
+      .size(size)
       .semantics { contentDescription = label },
     colors = ButtonDefaults.filledTonalButtonColors(),
   ) {
@@ -894,12 +905,10 @@ private enum class ActionIcon {
 }
 
 internal enum class TopLevelAction(val label: String) {
-  Home("Home"),
   NowPlaying("Now playing"),
 }
 
 internal fun PlexWearUiState.topLevelActions(): List<TopLevelAction> = buildList {
-  if (screen != Screen.Home) add(TopLevelAction.Home)
   if (canOpenCurrentPlayback) add(TopLevelAction.NowPlaying)
 }
 

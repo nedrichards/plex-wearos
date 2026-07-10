@@ -35,9 +35,9 @@ The home screen is the main hub:
 - `Recent` shows recent tracks for quick playback.
 - `Settings` contains account, offline cache, and quality controls.
 
-List screens keep global navigation at the top. `Home` and `Now playing` appear
-above the current screen content when they are relevant, so long album or
-playlist lists do not hide the way back at the bottom.
+List screens use the system back gesture to return through the loaded app
+screens. When music is playing, a compact Now Playing action remains available
+above the current screen content.
 
 Album, playlist, and browse screens expose a compact search icon rather than a
 full-width search row. Search filters loaded rows locally and matches album,

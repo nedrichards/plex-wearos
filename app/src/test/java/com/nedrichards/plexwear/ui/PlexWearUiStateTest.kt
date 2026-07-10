@@ -56,7 +56,7 @@ class PlexWearUiStateTest {
   }
 
   @Test
-  fun topLevelActions_keepGlobalNavigationAboveScreenContent() {
+  fun topLevelActions_onlyExposeCompactNowPlayingShortcut() {
     assertEquals(emptyList<TopLevelAction>(), PlexWearUiState(screen = Screen.Home).topLevelActions())
 
     assertEquals(
@@ -65,12 +65,12 @@ class PlexWearUiStateTest {
     )
 
     assertEquals(
-      listOf(TopLevelAction.Home),
+      emptyList<TopLevelAction>(),
       PlexWearUiState(screen = Screen.NowPlaying, nowPlaying = track()).topLevelActions(),
     )
 
     assertEquals(
-      listOf(TopLevelAction.Home, TopLevelAction.NowPlaying),
+      listOf(TopLevelAction.NowPlaying),
       PlexWearUiState(screen = Screen.Tracks, nowPlaying = track()).topLevelActions(),
     )
   }
