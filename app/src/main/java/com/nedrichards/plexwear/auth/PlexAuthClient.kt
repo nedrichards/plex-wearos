@@ -2,10 +2,10 @@ package com.nedrichards.plexwear.auth
 
 import com.nedrichards.plexwear.BuildConfig
 import com.nedrichards.plexwear.data.PlexRequestBuilder
+import com.nedrichards.plexwear.data.parsePlexXml
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.w3c.dom.Element
@@ -107,9 +107,7 @@ object PlexAuthXmlParser {
     accountToken: String? = null,
     fallbackServerUrl: String? = null,
   ): PlexCredentials {
-    val document = DocumentBuilderFactory.newInstance()
-      .newDocumentBuilder()
-      .parse(InputSource(xml.reader()))
+    val document = parsePlexXml(xml)
     val servers = document.elements("Device", "device", "Resource", "resource")
       .filter { device ->
         device.attr("provides")
@@ -186,9 +184,7 @@ object PlexAuthXmlParser {
       .thenByDescending { if (it.https) 1 else 0 }
 
   private fun parseRoot(xml: String): Element =
-    DocumentBuilderFactory.newInstance()
-      .newDocumentBuilder()
-      .parse(InputSource(xml.reader()))
+    parsePlexXml(xml)
       .documentElement
 
   private fun Element.connectionElements(): Sequence<Element> {

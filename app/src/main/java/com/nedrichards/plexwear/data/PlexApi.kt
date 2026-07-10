@@ -147,9 +147,7 @@ object PlexXmlParser {
   }
 
   private fun parseElements(xml: String, vararg tags: String): List<Element> {
-    val document = DocumentBuilderFactory.newInstance()
-      .newDocumentBuilder()
-      .parse(InputSource(xml.reader()))
+    val document = parsePlexXml(xml)
     return tags.flatMap { tag ->
       val nodes = document.getElementsByTagName(tag)
       (0 until nodes.length).map { index -> nodes.item(index) as Element }
@@ -168,3 +166,12 @@ object PlexXmlParser {
       .firstOrNull { it.isNotBlank() }
   }
 }
+
+internal fun parsePlexXml(xml: String) =
+  require(!xml.contains("<!DOCTYPE", ignoreCase = true)) { "DOCTYPE declarations are not supported" }
+    .let {
+      DocumentBuilderFactory.newInstance()
+        .newDocumentBuilder()
+        .apply { setEntityResolver { _, _ -> error("External XML entities are not supported") } }
+        .parse(InputSource(xml.reader()))
+    }

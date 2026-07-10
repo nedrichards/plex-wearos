@@ -114,7 +114,7 @@ android {
             buildConfigField("String", "DEBUG_PLEX_TOKEN", (localProperties.getProperty("plex.token") ?: "").asBuildConfigString())
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             buildConfigField("String", "DEBUG_PLEX_SERVER_URL", "\"\"")
             buildConfigField("String", "DEBUG_PLEX_TOKEN", "\"\"")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

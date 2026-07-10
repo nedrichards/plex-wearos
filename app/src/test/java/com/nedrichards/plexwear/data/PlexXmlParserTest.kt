@@ -1,6 +1,7 @@
 package com.nedrichards.plexwear.data
 
 import junit.framework.TestCase.assertEquals
+import junit.framework.TestCase.assertTrue
 import org.junit.Test
 
 class PlexXmlParserTest {
@@ -109,5 +110,17 @@ class PlexXmlParserTest {
     assertEquals(true, session.paused)
     assertEquals(PlexPlaybackAction.Play, session.playbackAction)
     assertEquals(true, session.canTogglePlayback)
+  }
+
+  @Test
+  fun libraries_rejectsDoctypeDeclarations() {
+    val xml = """
+      <!DOCTYPE MediaContainer [<!ENTITY ignored "value">]>
+      <MediaContainer><Directory key="1" title="&ignored;" type="artist" /></MediaContainer>
+    """.trimIndent()
+
+    val failure = runCatching { PlexXmlParser.libraries(xml) }.exceptionOrNull()
+
+    assertTrue(failure != null)
   }
 }
