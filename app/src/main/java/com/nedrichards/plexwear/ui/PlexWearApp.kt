@@ -151,7 +151,7 @@ private fun PlexWearScreen(
   onClearOfflineCache: () -> Unit,
 ) {
   val scrollState = rememberLazyListState()
-  val focusRequester = FocusRequester()
+  val focusRequester = remember { FocusRequester() }
   val coroutineScope = rememberCoroutineScope()
   val filteredBrowseItems = remember(state.items, state.searchQuery) {
     filterBrowseItems(state.items, state.searchQuery)
