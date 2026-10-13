@@ -57,6 +57,7 @@ class PlexWearUiStateTest {
 
   @Test
   fun topLevelActions_onlyExposeCompactNowPlayingShortcut() {
+    assertEquals("Now playing", TopLevelAction.NowPlaying.label)
     assertEquals(emptyList<TopLevelAction>(), PlexWearUiState(screen = Screen.Home).topLevelActions())
 
     assertEquals(

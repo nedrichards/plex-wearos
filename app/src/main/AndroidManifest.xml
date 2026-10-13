@@ -6,6 +6,7 @@
         android:required="true" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
@@ -24,6 +25,7 @@
             android:value="true" />
         <activity
             android:name=".MainActivity"
+            android:taskAffinity="com.nedrichards.plexwear"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

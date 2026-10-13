@@ -9,14 +9,16 @@ data class PlexRequest(
 )
 
 object PlexRequestBuilder {
-  internal val clientHeaders = mapOf(
+  @Volatile private var clientIdentifier: String = "plex-wearos"
+  fun configureClientIdentifier(identifier: String) { clientIdentifier = identifier }
+  internal val clientHeaders get() = mapOf(
     "Accept" to "application/xml",
-    "X-Plex-Client-Identifier" to "plex-wearos-debug",
+    "X-Plex-Client-Identifier" to clientIdentifier,
     "X-Plex-Device" to "Wear OS",
     "X-Plex-Device-Name" to "Plex Wear",
     "X-Plex-Platform" to "Android",
     "X-Plex-Product" to "Plex Wear",
-    "X-Plex-Version" to "0.1",
+    "X-Plex-Version" to com.nedrichards.plexwear.BuildConfig.VERSION_NAME,
   )
 
   fun build(credentials: PlexCredentials, path: String, query: Map<String, String> = emptyMap()): PlexRequest {

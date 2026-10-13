@@ -30,6 +30,7 @@ data class PlexTrack(
   val thumb: String?,
   val partKey: String?,
   val audioCodec: String? = null,
+  val playlistEntryId: String? = null,
 )
 
 data class PlexSession(

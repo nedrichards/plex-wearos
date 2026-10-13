@@ -1,30 +1,47 @@
 package com.nedrichards.plexwear.ui
 
 import android.app.RemoteInput
+import android.content.Intent
+import android.content.ComponentName
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.media.MediaRouter2
+import android.os.Build
+import android.provider.Settings
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.wear.compose.material3.AppScaffold
+import androidx.wear.compose.material3.ScreenScaffold
+import com.nedrichards.plexwear.R
+import com.nedrichards.plexwear.offline.OfflineQuality
+import com.nedrichards.plexwear.playback.PlaybackStatus
+import com.nedrichards.plexwear.data.PlexPlaylist
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumnScope
+import androidx.wear.compose.foundation.lazy.items
+import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,14 +49,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,19 +68,17 @@ import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.CircularProgressIndicator
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
-import androidx.wear.compose.material3.TimeText
 import androidx.wear.input.RemoteInputIntentHelper
-import com.nedrichards.plexwear.BuildConfig
 import com.nedrichards.plexwear.auth.PlexCredentials
 import com.nedrichards.plexwear.data.BrowseItem
 import com.nedrichards.plexwear.data.PlexSession
 import com.nedrichards.plexwear.data.PlexTrack
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 
 @Composable
 fun PlexWearApp(viewModel: PlexWearViewModel) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
+  val context = LocalContext.current
   val searchLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.StartActivityForResult(),
   ) { activityResult ->
@@ -80,12 +92,7 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
   }
 
   MaterialTheme {
-    Box(
-      modifier = Modifier
-        .fillMaxSize()
-        .background(AppBackground),
-    ) {
-      TimeText()
+    AppScaffold {
       PlexWearScreen(
         state = state,
         onBack = viewModel::navigateBack,
@@ -93,9 +100,10 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
         onReset = viewModel::resetAuth,
         onStartPinAuth = viewModel::startPinAuth,
         onCancelPinAuth = viewModel::cancelPinAuth,
-        onSearch = { searchLauncher.launch(searchInputIntent()) },
+        onSearch = { searchLauncher.launch(searchInputIntent(context)) },
         onClearSearch = viewModel::clearSearchQuery,
         onLoadMore = viewModel::loadMore,
+        onRetryPage = viewModel::retryPage,
         onItemClick = { item ->
           when (item) {
             is BrowseItem.LibraryItem -> viewModel.loadAlbums(item.library)
@@ -105,12 +113,18 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
           }
         },
         onSelectTrack = viewModel::openTrack,
-        onPlay = { viewModel.play(it) },
-        onPlayAll = { viewModel.playAll(it) },
+        onPlay = { offerAudioOutput(context); viewModel.play(it) },
+        onPlayAll = { offerAudioOutput(context); viewModel.playAll(it) },
         onDownloadTrack = viewModel::downloadTrack,
         onDownloadTracks = viewModel::downloadTracks,
-        onCurrentPlayback = viewModel::openCurrentPlayback,
-        onTogglePlayback = viewModel::togglePlayback,
+        onCurrentPlayback = {
+          viewModel.openCurrentPlayback()
+          if (state.playbackPaused) { offerAudioOutput(context); viewModel.togglePlayback() }
+        },
+        onTogglePlayback = {
+          if (state.playbackPaused || state.playbackStatus in listOf(PlaybackStatus.Ended, PlaybackStatus.Failed)) offerAudioOutput(context)
+          viewModel.togglePlayback()
+        },
         onPrevious = viewModel::skipToPrevious,
         onNext = viewModel::skipToNext,
         onPlaylists = viewModel::loadPlaylists,
@@ -118,62 +132,91 @@ fun PlexWearApp(viewModel: PlexWearViewModel) {
         onToggleSessionPlayback = viewModel::toggleSessionPlayback,
         onCycleOfflineQuality = viewModel::cycleOfflineQuality,
         onClearOfflineCache = viewModel::clearOfflineCache,
+        onDownloads = viewModel::openDownloads,
+        onDownloadCollection = viewModel::openDownloadCollection,
+        onRemoveDownload = viewModel::removeDownload,
+        onCancelDownloads = viewModel::cancelDownloads,
+        onRetryDownloads = viewModel::retryDownloads,
+        onRefreshHome = viewModel::refreshHome,
+        onQuality = viewModel::setOfflineQuality,
+        onAutoCache = viewModel::toggleAutoCache,
+        onServer = viewModel::selectServer,
+        onPin = viewModel::togglePlaylistPin,
       )
     }
   }
 }
 
 @Composable
-private fun PlexWearScreen(
+internal fun PlexWearScreen(
   state: PlexWearUiState,
-  onBack: () -> Unit,
-  onSettings: () -> Unit,
-  onReset: () -> Unit,
-  onStartPinAuth: () -> Unit,
-  onCancelPinAuth: () -> Unit,
-  onSearch: () -> Unit,
-  onClearSearch: () -> Unit,
-  onLoadMore: () -> Unit,
-  onItemClick: (BrowseItem) -> Unit,
-  onSelectTrack: (PlexTrack) -> Unit,
-  onPlay: (PlexTrack) -> Unit,
-  onPlayAll: (List<PlexTrack>) -> Unit,
-  onDownloadTrack: (PlexTrack) -> Unit,
-  onDownloadTracks: (List<PlexTrack>) -> Unit,
-  onCurrentPlayback: () -> Unit,
-  onTogglePlayback: () -> Unit,
-  onPrevious: () -> Unit,
-  onNext: () -> Unit,
-  onPlaylists: () -> Unit,
-  onSessions: () -> Unit,
-  onToggleSessionPlayback: (PlexSession) -> Unit,
-  onCycleOfflineQuality: () -> Unit,
-  onClearOfflineCache: () -> Unit,
+  onBack: () -> Unit = {},
+  onSettings: () -> Unit = {},
+  onReset: () -> Unit = {},
+  onStartPinAuth: () -> Unit = {},
+  onCancelPinAuth: () -> Unit = {},
+  onSearch: () -> Unit = {},
+  onClearSearch: () -> Unit = {},
+  onLoadMore: () -> Unit = {},
+  onRetryPage: () -> Unit = onLoadMore,
+  onItemClick: (BrowseItem) -> Unit = {},
+  onSelectTrack: (PlexTrack) -> Unit = {},
+  onPlay: (PlexTrack) -> Unit = {},
+  onPlayAll: (List<PlexTrack>) -> Unit = {},
+  onDownloadTrack: (PlexTrack) -> Unit = {},
+  onDownloadTracks: (List<PlexTrack>) -> Unit = {},
+  onCurrentPlayback: () -> Unit = {},
+  onTogglePlayback: () -> Unit = {},
+  onPrevious: () -> Unit = {},
+  onNext: () -> Unit = {},
+  onPlaylists: () -> Unit = {},
+  onSessions: () -> Unit = {},
+  onToggleSessionPlayback: (PlexSession) -> Unit = {},
+  onCycleOfflineQuality: () -> Unit = {},
+  onClearOfflineCache: () -> Unit = {},
+  onDownloads: () -> Unit = {},
+  onDownloadCollection: (String) -> Unit = {},
+  onRemoveDownload: (PlexTrack) -> Unit = {},
+  onCancelDownloads: () -> Unit = {},
+  onRetryDownloads: () -> Unit = {},
+  onRefreshHome: () -> Unit = {},
+  onQuality: (OfflineQuality) -> Unit = {},
+  onAutoCache: () -> Unit = {},
+  onServer: (String) -> Unit = {},
+  onPin: (PlexPlaylist) -> Unit = {},
 ) {
-  val scrollState = rememberLazyListState()
-  val focusRequester = remember { FocusRequester() }
-  val coroutineScope = rememberCoroutineScope()
+  val stateHolder = rememberSaveableStateHolder()
+  // Authentication changes the Home structure; its old onboarding anchor must not carry into music.
+  val accountScrollIdentity = remember(state.credentials) {
+    "${state.credentials.cacheScope}:${state.configured}"
+  }
+  stateHolder.SaveableStateProvider("$accountScrollIdentity:${state.destinationId}") {
+
+  val scrollState = rememberTransformingLazyColumnState()
   val filteredBrowseItems = remember(state.items, state.searchQuery) {
     filterBrowseItems(state.items, state.searchQuery)
   }
   val filteredTracks = remember(state.tracks, state.searchQuery) {
     filterTracks(state.tracks, state.searchQuery)
   }
+  val occurrences = remember(state.tracks) { trackOccurrences(state.tracks) }
+  val visibleOccurrences = remember(occurrences, filteredTracks, state.searchQuery) {
+    if (state.searchQuery.isBlank()) occurrences else {
+      val matches = filteredTracks.toHashSet()
+      occurrences.filter { it.second in matches }
+    }
+  }
   val showTitle = state.showScreenTitle()
 
   BackHandler(enabled = state.screen != Screen.Home) { onBack() }
 
-  LaunchedEffect(state.screen, state.title) {
-    focusRequester.requestFocus()
-  }
-
-  LaunchedEffect(state.screen, state.canLoadMore, state.loadingMore, state.searchQuery) {
+  LaunchedEffect(state.screen, state.canLoadMore, state.loadingMore, state.searchQuery, state.pageError) {
     snapshotFlow {
       val layout = scrollState.layoutInfo
-      layout.visibleItemsInfo.lastOrNull()?.index to layout.totalItemsCount
+      layout.visibleItems.lastOrNull()?.index to layout.totalItemsCount
     }.collect { (lastVisibleIndex, totalItems) ->
       if (
-        state.canLoadMore &&
+        !state.searching && state.pageError == null && state.canLoadMore &&
         !state.loadingMore &&
         totalItems > 0 &&
         (lastVisibleIndex ?: -1) >= totalItems - AUTO_LOAD_THRESHOLD_ITEMS
@@ -183,19 +226,16 @@ private fun PlexWearScreen(
     }
   }
 
-  LazyColumn(
+  // Match the pinned Wear library's 10% vertical inset using public configuration APIs.
+  val verticalContentPadding = (LocalConfiguration.current.screenHeightDp * 0.1f).dp
+  ScreenScaffold(
+    scrollState = scrollState,
+    contentPadding = PaddingValues(horizontal = 18.dp, vertical = verticalContentPadding),
+  ) { scaffoldPadding ->
+  TransformingLazyColumn(
     state = scrollState,
-    modifier = Modifier
-      .fillMaxSize()
-      .focusRequester(focusRequester)
-      .onRotaryScrollEvent {
-        coroutineScope.launch {
-          scrollState.scrollBy(it.verticalScrollPixels)
-        }
-        true
-      }
-      .focusable(),
-    contentPadding = PaddingValues(start = 18.dp, top = 34.dp, end = 18.dp, bottom = 24.dp),
+    modifier = Modifier.fillMaxSize().testTag("destination-list"),
+    contentPadding = scaffoldPadding,
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.spacedBy(10.dp),
   ) {
@@ -218,10 +258,11 @@ private fun PlexWearScreen(
         item(key = "error") { StatusText(error) }
       }
 
-      if (!state.configured && state.screen != Screen.Settings) {
+      if (!state.configured && state.screen !in listOf(Screen.Settings, Screen.Downloads, Screen.Track, Screen.NowPlaying, Screen.Tracks)) {
         item(key = "onboarding") {
           ListItemGroup {
             OnboardingContent(state.auth, onStartPinAuth, onCancelPinAuth, onSettings)
+            AppButton(stringResource(R.string.downloads), onDownloads)
           }
         }
       } else {
@@ -232,26 +273,32 @@ private fun PlexWearScreen(
         }
 
         when (state.screen) {
-          Screen.Home -> homeContent(state, onItemClick, onPlay, onPlaylists, onSessions, onSettings)
+          Screen.Home -> homeContent(state, onItemClick, onSelectTrack, onPlaylists, onSessions, onSettings, onDownloads, onRefreshHome)
           Screen.Albums, Screen.Playlists -> browseContent(
             state,
             filteredBrowseItems,
             onItemClick,
             onSearch,
             onClearSearch,
+            onLoadMore,
+            onRetryPage,
+            onPin,
           )
           Screen.Tracks -> tracksContent(
             state,
             filteredTracks,
+            visibleOccurrences,
             onSelectTrack,
             onPlayAll,
             onDownloadTracks,
             onSearch,
             onClearSearch,
+            onLoadMore,
+            onRetryPage,
           )
           Screen.Track -> item(key = "track-content") {
             ListItemGroup {
-              TrackContent(state, onPlay, onDownloadTrack)
+              TrackContent(state, onPlay, onDownloadTrack, onRemoveDownload)
             }
           }
           Screen.NowPlaying -> item(key = "now-playing-content") {
@@ -259,15 +306,14 @@ private fun PlexWearScreen(
               NowPlayingContent(state, onTogglePlayback, onPrevious, onNext)
             }
           }
+          Screen.Downloads -> downloadsContent(state, onDownloadCollection, onSelectTrack, onCancelDownloads, onRetryDownloads)
           Screen.Sessions -> sessionsContent(state, onToggleSessionPlayback, onSessions)
-          Screen.Settings -> item(key = "settings-content") {
-            ListItemGroup {
-              SettingsContent(state, onReset, onCycleOfflineQuality, onClearOfflineCache)
-            }
-          }
+          Screen.Settings -> settingsContent(state, onReset, onClearOfflineCache, onQuality, onAutoCache, onServer)
         }
       }
     }
+  }
+  }
   }
 }
 
@@ -289,71 +335,72 @@ private fun TopLevelActions(
 ) {
   val actions = state.topLevelActions()
   if (actions.isEmpty()) return
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.Center,
-  ) {
-    IconActionButton(
-      icon = ActionIcon.Play,
-      label = actions.single().label,
-      onClick = onCurrentPlayback,
-    )
-  }
+  AppButton(
+    text = stringResource(if (state.playbackPaused) R.string.resume else R.string.now_playing),
+    onClick = onCurrentPlayback,
+  )
 }
 
-private fun LazyListScope.homeContent(
+private fun TransformingLazyColumnScope.homeContent(
   state: PlexWearUiState,
   onItemClick: (BrowseItem) -> Unit,
   onPlay: (PlexTrack) -> Unit,
   onPlaylists: () -> Unit,
   onSessions: () -> Unit,
   onSettings: () -> Unit,
+  onDownloads: () -> Unit,
+  onRefreshHome: () -> Unit,
 ) {
+  item(key = "home-downloads") { NavigationRow(stringResource(R.string.downloads), stringResource(R.string.listen_offline), RowIcon.Track, onDownloads) }
+  items(state.pinnedPlaylists, key = { "pin-${it.key}" }) { playlist ->
+    BrowseRow(state.credentials, BrowseItem.PlaylistItem(playlist), onItemClick)
+  }
+  item(key = "home-refresh") { AppButton(stringResource(R.string.refresh), onRefreshHome, enabled = !state.refreshingHome) }
   item(key = "home-playlists") {
     NavigationRow(
-      title = "Playlists",
-      subtitle = "Saved playlists",
+      title = stringResource(R.string.playlists),
+      subtitle = stringResource(R.string.saved_playlists),
       icon = RowIcon.Playlist,
       onClick = onPlaylists,
-    )
-  }
-  item(key = "home-sessions") {
-    NavigationRow(
-      title = "Active streams",
-      subtitle = "Pause other players",
-      icon = RowIcon.Track,
-      onClick = onSessions,
     )
   }
   items(state.items, key = { it.browseStableKey() }) { item ->
     BrowseRow(state.credentials, item, onItemClick)
   }
   if (state.tracks.isNotEmpty()) {
-    item(key = "recent-label") { SectionLabel("Recent") }
+    item(key = "recent-label") { SectionLabel(stringResource(R.string.recent)) }
     items(state.tracks, key = { "recent-${it.ratingKey}" }) { track ->
       TrackRow(state.credentials, track, onPlay)
     }
   }
+  item(key = "home-sessions") {
+    NavigationRow(
+      title = stringResource(R.string.active_streams),
+      subtitle = stringResource(R.string.pause_other_players),
+      icon = RowIcon.Track,
+      onClick = onSessions,
+    )
+  }
   item(key = "home-settings") {
     NavigationRow(
-      title = "Settings",
-      subtitle = "Account and server",
+      title = stringResource(R.string.settings),
+      subtitle = stringResource(R.string.account_server),
       icon = RowIcon.Settings,
       onClick = onSettings,
     )
   }
 }
 
-private fun LazyListScope.sessionsContent(
+private fun TransformingLazyColumnScope.sessionsContent(
   state: PlexWearUiState,
   onToggleSessionPlayback: (PlexSession) -> Unit,
   onRefresh: () -> Unit,
 ) {
   item(key = "sessions-refresh") {
-    IconActionButton(icon = ActionIcon.Refresh, label = "Refresh", onClick = onRefresh)
+    IconActionButton(icon = ActionIcon.Refresh, label = stringResource(R.string.refresh), onClick = onRefresh)
   }
   if (state.sessions.isEmpty()) {
-    item(key = "sessions-empty") { StatusText("No active streams.") }
+    item(key = "sessions-empty") { StatusText(stringResource(R.string.no_active_streams)) }
   }
   items(state.sessions, key = { it.sessionKey }) { session ->
     SessionRow(session = session, onTogglePlayback = { onToggleSessionPlayback(session) })
@@ -378,46 +425,58 @@ private fun OnboardingContent(
   }
   if (auth.waiting) {
     CircularProgressIndicator(modifier = Modifier.size(24.dp))
-    AppButton(text = "Cancel", onClick = onCancelPinAuth)
+    AppButton(text = stringResource(R.string.cancel), onClick = onCancelPinAuth)
   } else {
-    AppButton(text = "Sign in with Plex", onClick = onStartPinAuth)
-    AppButton(text = "Settings", onClick = onSettings)
+    AppButton(text = stringResource(R.string.sign_in), onClick = onStartPinAuth)
+    AppButton(text = stringResource(R.string.settings), onClick = onSettings)
   }
 }
 
-private fun LazyListScope.browseContent(
+private fun TransformingLazyColumnScope.browseContent(
   state: PlexWearUiState,
   browseItems: List<BrowseItem>,
   onItemClick: (BrowseItem) -> Unit,
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
+  onLoadMore: () -> Unit,
+  onRetryPage: () -> Unit,
+  onPin: (PlexPlaylist) -> Unit,
 ) {
   item(key = "search-controls") {
     SearchControls(state.searchQuery, onSearch, onClearSearch)
   }
   if (browseItems.isEmpty()) {
-    item(key = "browse-empty") { StatusText(if (state.searching) "No matches." else "Nothing found.") }
+    item(key = "browse-empty") { StatusText(if (state.searching) stringResource(R.string.no_matches) else stringResource(R.string.nothing_found)) }
   }
   items(browseItems, key = { it.browseStableKey() }) { item ->
-    BrowseRow(state.credentials, item, onItemClick)
+    ListItemGroup {
+      BrowseRow(state.credentials, item, onItemClick)
+      if (item is BrowseItem.PlaylistItem) AppButton(stringResource(if (state.pinnedPlaylists.any { it.key == item.playlist.key }) R.string.unpin else R.string.pin), { onPin(item.playlist) })
+    }
   }
-  loadMoreItem(state)
+  loadMoreItem(state, onLoadMore, onRetryPage)
 }
 
-private fun LazyListScope.tracksContent(
+private fun TransformingLazyColumnScope.tracksContent(
   state: PlexWearUiState,
   tracks: List<PlexTrack>,
+  occurrences: List<Pair<String, PlexTrack>>,
   onSelectTrack: (PlexTrack) -> Unit,
   onPlayAll: (List<PlexTrack>) -> Unit,
   onDownloadTracks: (List<PlexTrack>) -> Unit,
   onSearch: () -> Unit,
   onClearSearch: () -> Unit,
+  onLoadMore: () -> Unit,
+  onRetryPage: () -> Unit,
 ) {
   state.searchQuery.takeIf { it.isNotBlank() }?.let { query ->
-    item(key = "search-query") { StatusText("Search: $query") }
+    item(key = "search-query") { StatusText(stringResource(R.string.search_query, query)) }
   }
   if (tracks.isEmpty()) {
-    item(key = "tracks-empty") { StatusText(if (state.searching) "No matches." else "No tracks found.") }
+    item(key = "tracks-empty") { StatusText(if (state.searching) stringResource(R.string.no_matches) else stringResource(R.string.no_tracks)) }
+  }
+  item(key = "track-scope") {
+    StatusText(stringResource(R.string.loaded_track_count, state.tracks.size))
   }
   if (tracks.isNotEmpty() || state.tracks.isNotEmpty()) {
     item(key = "track-actions") {
@@ -426,13 +485,13 @@ private fun LazyListScope.tracksContent(
         onSearch = onSearch,
         onClearSearch = onClearSearch,
         onPlayAll = { onPlayAll(tracks) },
-        onDownloadTracks = { onDownloadTracks(state.tracks) },
+        onDownloadTracks = { onDownloadTracks(tracks) },
         canPlay = tracks.isNotEmpty(),
-        canDownload = state.tracks.isNotEmpty(),
+        canDownload = tracks.isNotEmpty(),
       )
     }
   }
-  items(tracks, key = { it.ratingKey }) { track ->
+  items(occurrences, key = { it.first }) { (_, track) ->
     TrackRow(
       credentials = state.credentials,
       track = track,
@@ -440,10 +499,14 @@ private fun LazyListScope.tracksContent(
       offlineStatus = state.offlineStatus(track),
     )
   }
-  loadMoreItem(state)
+  loadMoreItem(state, onLoadMore, onRetryPage)
 }
 
-private fun LazyListScope.loadMoreItem(state: PlexWearUiState) {
+private fun TransformingLazyColumnScope.loadMoreItem(state: PlexWearUiState, onLoadMore: () -> Unit, onRetryPage: () -> Unit) {
+  state.pageError?.let { error -> item(key = "page-error") { ListItemGroup { StatusText(error); AppButton(stringResource(R.string.retry), onRetryPage) } } }
+  if (state.canLoadMore && !state.loadingMore && state.pageError == null) item(key = "load-more") {
+    AppButton(stringResource(if (state.searching) R.string.search_more else R.string.load_more), onLoadMore)
+  }
   if (state.loadingMore) {
     item(key = "load-more-progress") { CircularProgressIndicator(modifier = Modifier.size(28.dp)) }
   }
@@ -454,10 +517,11 @@ private fun TrackContent(
   state: PlexWearUiState,
   onPlay: (PlexTrack) -> Unit,
   onDownloadTrack: (PlexTrack) -> Unit,
+  onRemoveDownload: (PlexTrack) -> Unit,
 ) {
   val track = state.selectedTrack
   if (track == null) {
-    StatusText("No track selected.")
+    StatusText(stringResource(R.string.no_track_selected))
     return
   }
 
@@ -471,19 +535,20 @@ private fun TrackContent(
   ) {
     IconActionButton(
       icon = ActionIcon.Play,
-      label = "Play",
+      label = stringResource(R.string.play),
       onClick = { onPlay(track) },
       size = 48.dp,
     )
-    if (state.downloadedQuality(track) == null && !state.isDownloading(track)) {
+    if (!state.isDownloading(track)) {
       IconActionButton(
         icon = ActionIcon.Download,
-        label = "Download ${state.offlineQuality.bitrateKbps}k",
+        label = stringResource(R.string.download_quality_action, state.offlineQuality.bitrateKbps),
         onClick = { onDownloadTrack(track) },
         size = 48.dp,
       )
     }
   }
+  if (state.downloadedQuality(track) != null) AppButton(stringResource(R.string.remove_download), { onRemoveDownload(track) })
 }
 
 @Composable
@@ -496,24 +561,19 @@ private fun TrackListActions(
   canPlay: Boolean,
   canDownload: Boolean,
 ) {
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-  ) {
+  ListItemGroup {
     IconActionButton(
       icon = if (searching) ActionIcon.Clear else ActionIcon.Search,
-      label = if (searching) "Clear search" else "Search",
+      label = stringResource(if (searching) R.string.clear_search else R.string.search),
       onClick = if (searching) onClearSearch else onSearch,
     )
-    IconActionButton(
-      icon = ActionIcon.Play,
-      label = "Play all",
+    AppButton(
+      text = stringResource(if (searching) R.string.play_results else R.string.play_collection),
       onClick = onPlayAll,
       enabled = canPlay,
     )
-    IconActionButton(
-      icon = ActionIcon.Download,
-      label = "Download tracks",
+    AppButton(
+      text = stringResource(if (searching) R.string.download_results else R.string.download_collection),
       onClick = onDownloadTracks,
       enabled = canDownload,
     )
@@ -533,7 +593,7 @@ private fun SearchControls(
   ) {
     query.takeIf { it.isNotBlank() }?.let {
       Text(
-        text = "Search: $it",
+        text = stringResource(R.string.search_query, it),
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -545,13 +605,13 @@ private fun SearchControls(
       if (query.isNotBlank()) {
         IconActionButton(
           icon = ActionIcon.Clear,
-          label = "Clear search",
+          label = stringResource(R.string.clear_search),
           onClick = onClearSearch,
         )
       }
       IconActionButton(
         icon = ActionIcon.Search,
-        label = "Search",
+        label = stringResource(R.string.search),
         onClick = onSearch,
       )
     }
@@ -565,11 +625,23 @@ private fun NowPlayingContent(
   onPrevious: () -> Unit,
   onNext: () -> Unit,
 ) {
+  val context = LocalContext.current
+  state.nowPlaying?.thumb?.let { PlexArtwork(state.credentials, it, null, size = 64.dp) }
+  StatusText(stringResource(when (state.playbackStatus) {
+    PlaybackStatus.Idle -> R.string.playback_idle
+    PlaybackStatus.Starting -> R.string.playback_starting
+    PlaybackStatus.Buffering -> R.string.playback_buffering
+    PlaybackStatus.Playing -> R.string.playback_playing
+    PlaybackStatus.Paused -> R.string.playback_paused
+    PlaybackStatus.Ended -> R.string.playback_ended
+    PlaybackStatus.Failed -> R.string.playback_failed
+  }))
+  StatusText("${state.playbackPositionMs.formatDuration()} / ${state.playbackDurationMs.formatDuration()}")
   state.nowPlayingContext?.let {
     Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
   }
   if (state.nowPlayingTrackCount > 1) {
-    StatusText("${state.nowPlayingIndex + 1} of ${state.nowPlayingTrackCount}")
+    StatusText(stringResource(R.string.queue_position, state.nowPlayingIndex + 1, state.nowPlayingTrackCount))
   }
   state.nowPlaying?.let {
     Text(it.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -581,39 +653,64 @@ private fun NowPlayingContent(
   ) {
     IconActionButton(
       icon = ActionIcon.Previous,
-      label = "Previous",
+      label = stringResource(R.string.previous),
       onClick = onPrevious,
       enabled = state.canPlayPrevious,
     )
     IconActionButton(
       icon = if (state.playbackPaused) ActionIcon.Play else ActionIcon.Pause,
-      label = if (state.playbackPaused) "Resume" else "Pause",
+      label = if (state.playbackPaused) stringResource(R.string.resume) else stringResource(R.string.pause),
       onClick = onTogglePlayback,
+      enabled = state.playbackStatus != PlaybackStatus.Starting,
+      size = 56.dp,
     )
     IconActionButton(
       icon = ActionIcon.Next,
-      label = "Next",
+      label = stringResource(R.string.next),
       onClick = onNext,
       enabled = state.canPlayNext,
     )
   }
+  AppButton(stringResource(R.string.audio_output), { launchAudioOutput(context) })
 }
 
-@Composable
-private fun SettingsContent(
+private fun TransformingLazyColumnScope.downloadsContent(state: PlexWearUiState, onCollection: (String) -> Unit, onTrack: (PlexTrack) -> Unit, onCancel: () -> Unit, onRetry: () -> Unit) {
+  state.downloadProgress?.let { progress -> item(key = "download-progress") { StatusText(progress) } }
+  if (state.downloadBusy) item(key = "download-cancel") { AppButton(stringResource(R.string.cancel), onCancel) }
+  state.downloadError?.let { error -> item(key = "download-error") { ListItemGroup { StatusText(error); AppButton(stringResource(R.string.retry), onRetry) } } }
+  if (state.downloadedTracks.isEmpty()) item(key = "downloads-empty") { StatusText(stringResource(R.string.no_downloads)) }
+  items(state.downloadedCollections.keys.toList(), key = { "collection-$it" }) { title ->
+    NavigationRow(title, stringResource(R.string.track_count, state.downloadedCollections[title].orEmpty().size), RowIcon.Playlist, { onCollection(title) })
+  }
+  items(state.downloadedTracks, key = { "download-${it.ratingKey}" }) { track -> TrackRow(state.credentials, track, onTrack, state.offlineStatus(track)) }
+}
+
+internal fun trackOccurrences(tracks: List<PlexTrack>): List<Pair<String, PlexTrack>> = tracks.mapIndexed { index, track ->
+  "${track.ratingKey}:${track.playlistEntryId.orEmpty()}:$index" to track
+}
+
+private fun TransformingLazyColumnScope.settingsContent(
   state: PlexWearUiState,
   onReset: () -> Unit,
-  onCycleOfflineQuality: () -> Unit,
   onClearOfflineCache: () -> Unit,
+  onQuality: (OfflineQuality) -> Unit,
+  onAutoCache: () -> Unit,
+  onServer: (String) -> Unit,
 ) {
-  StatusText(if (state.configured) "Credentials are stored on this watch." else "No credentials stored.")
-  StatusText("Downloads: ${state.offlineCacheBytes.formatBytes()}")
-  AppButton(text = "Quality: ${state.offlineQuality.summary}", onClick = onCycleOfflineQuality)
-  AppButton(text = "Clear downloads", onClick = onClearOfflineCache, enabled = state.offlineCacheBytes > 0)
-  if (BuildConfig.DEBUG) {
-    StatusText("Debug builds still seed plex.serverUrl and plex.token when local.properties is set.")
+  item(key = "account-status") { StatusText(stringResource(if (state.configured) R.string.credentials_saved else R.string.credentials_missing)) }
+  item(key = "download-storage") { StatusText(stringResource(R.string.download_storage, state.offlineCacheBytes.formatBytes())) }
+  item(key = "quality-label") { SectionLabel(stringResource(R.string.download_quality)) }
+  items(OfflineQuality.entries.toList(), key = { "quality-${it.name}" }) { quality ->
+    AppButton(stringResource(R.string.quality_choice, if (quality == state.offlineQuality) "✓ " else "", quality.bitrateKbps), { onQuality(quality) })
   }
-  AppButton(text = "Reset auth", onClick = onReset)
+  item(key = "automatic-cache") { AppButton(stringResource(if (state.autoCacheEnabled) R.string.auto_cache_on else R.string.auto_cache_off), onAutoCache) }
+  item(key = "automatic-cache-help") { StatusText(stringResource(R.string.auto_cache_help)) }
+  if (state.availableServers.isNotEmpty()) item(key = "server-label") { SectionLabel(stringResource(R.string.server)) }
+  items(state.availableServers, key = { "server-${it.id}" }) { server ->
+    AppButton(server.name, { onServer(server.id) }, enabled = server.credentials.cacheScope != state.credentials.cacheScope)
+  }
+  item(key = "clear-downloads") { AppButton(stringResource(R.string.clear_downloads), onClearOfflineCache, enabled = state.offlineCacheBytes > 0 || state.downloadBusy) }
+  item(key = "sign-out") { AppButton(stringResource(R.string.sign_out), onReset) }
 }
 
 @Composable
@@ -621,7 +718,7 @@ private fun BrowseRow(credentials: PlexCredentials, item: BrowseItem, onClick: (
   AppRow(
     credentials = credentials,
     title = item.browseRowTitle(),
-    subtitle = item.browseRowSubtitle(),
+    subtitle = if (item is BrowseItem.LibraryItem) stringResource(R.string.browse_albums) else item.browseRowSubtitle(),
     artworkPath = item.browseRowArtworkPath(),
     fallbackIcon = item.browseRowIcon(),
     onClick = { onClick(item) },
@@ -653,7 +750,7 @@ private fun SessionRow(
   onTogglePlayback: () -> Unit,
 ) {
   val subtitle = listOfNotNull(
-    if (session.paused) "Resume" else "Pause",
+    if (session.paused) stringResource(R.string.resume) else stringResource(R.string.pause),
     session.playerTitle,
     session.subtitle,
     session.state,
@@ -772,7 +869,7 @@ private fun IconActionButton(
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
-  size: Dp = 40.dp,
+  size: Dp = 48.dp,
 ) {
   val foreground = if (enabled) {
     MaterialTheme.colorScheme.onSecondaryContainer
@@ -828,9 +925,10 @@ private fun StatusText(text: String) {
   )
 }
 
+@Composable
 private fun PlexWearUiState.offlineStatus(track: PlexTrack): String? = when {
-  isDownloading(track) -> "Downloading"
-  downloadedQuality(track) != null -> "Downloaded ${downloadedQuality(track)?.bitrateKbps}k"
+  isDownloading(track) -> stringResource(R.string.downloading)
+  downloadedQuality(track) != null -> stringResource(R.string.downloaded_quality, downloadedQuality(track)?.bitrateKbps ?: 0)
   else -> null
 }
 
@@ -904,8 +1002,13 @@ private enum class ActionIcon {
   Search,
 }
 
-internal enum class TopLevelAction(val label: String) {
-  NowPlaying("Now playing"),
+internal enum class TopLevelAction {
+  NowPlaying;
+
+  val label: String
+    get() = when (this) {
+      NowPlaying -> "Now playing"
+    }
 }
 
 internal fun PlexWearUiState.topLevelActions(): List<TopLevelAction> = buildList {
@@ -1181,20 +1284,50 @@ private fun Long.formatDuration(): String {
   return "$minutes:${seconds.toString().padStart(2, '0')}"
 }
 
+/** Mirror the system output chooser with the documented Wear Bluetooth fallback. */
+private fun launchAudioOutput(context: Context) {
+  if (Build.VERSION.SDK_INT >= 34 && MediaRouter2.getInstance(context).showSystemOutputSwitcher()) return
+  // Horologist OutputSwitcher uses the Settings media panel and selects its system handler.
+  val panel = Intent("com.android.settings.panel.action.MEDIA_OUTPUT")
+    .putExtra("com.android.settings.panel.extra.PACKAGE_NAME", context.packageName)
+  val handler = context.packageManager.queryIntentActivities(panel, 0).firstOrNull { info ->
+    ((info.activityInfo?.applicationInfo?.flags ?: 0) and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0
+  }?.activityInfo
+  if (handler != null) {
+    panel.component = ComponentName(handler.packageName, handler.name)
+    context.startActivity(panel)
+  } else {
+    context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+      .putExtra("EXTRA_CONNECTION_ONLY", true)
+      .putExtra("EXTRA_CLOSE_ON_CONNECT", true)
+      .putExtra("android.bluetooth.devicepicker.extra.FILTER_TYPE", 1))
+  }
+}
+
+private fun offerAudioOutput(context: Context) {
+  val outputs = context.getSystemService(AudioManager::class.java).getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+  val external = outputs.any { it.type in setOf(
+    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET,
+    AudioDeviceInfo.TYPE_BLE_SPEAKER, AudioDeviceInfo.TYPE_BLE_BROADCAST,
+    AudioDeviceInfo.TYPE_HEARING_AID, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+    AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET,
+  ) }
+  if (!external) launchAudioOutput(context)
+}
+
 private const val KEY_SEARCH_QUERY = "plex_search_query"
 private const val AUTO_LOAD_THRESHOLD_ITEMS = 4
-private val AppBackground = Color.Black
 
-private fun searchInputIntent() = RemoteInputIntentHelper.createActionRemoteInputIntent().apply {
+private fun searchInputIntent(context: android.content.Context) = RemoteInputIntentHelper.createActionRemoteInputIntent().apply {
   val remoteInputs = listOf(
     RemoteInput.Builder(KEY_SEARCH_QUERY)
-      .setLabel("Search Plex")
+      .setLabel(context.getString(R.string.search_plex))
       .setAllowFreeFormInput(true)
       .build(),
   )
   RemoteInputIntentHelper.putRemoteInputsExtra(this, remoteInputs)
-  RemoteInputIntentHelper.putTitleExtra(this, "Search")
-  RemoteInputIntentHelper.putCancelLabelExtra(this, "Cancel")
-  RemoteInputIntentHelper.putConfirmLabelExtra(this, "Search")
-  RemoteInputIntentHelper.putInProgressLabelExtra(this, "Searching...")
+  RemoteInputIntentHelper.putTitleExtra(this, context.getString(R.string.search))
+  RemoteInputIntentHelper.putCancelLabelExtra(this, context.getString(R.string.cancel))
+  RemoteInputIntentHelper.putConfirmLabelExtra(this, context.getString(R.string.search))
+  RemoteInputIntentHelper.putInProgressLabelExtra(this, context.getString(R.string.searching))
 }

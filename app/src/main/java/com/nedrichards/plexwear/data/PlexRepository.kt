@@ -3,6 +3,8 @@ package com.nedrichards.plexwear.data
 import com.nedrichards.plexwear.auth.PlexCredentials
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -16,14 +18,17 @@ internal typealias PlexFetch = suspend (
   headers: Map<String, String>,
 ) -> String
 
-class PlexRepository internal constructor(private val fetch: PlexFetch) {
-  constructor(api: PlexApi) : this(api::get)
+class PlexRepository internal constructor(private val now: () -> Long = { System.nanoTime() / 1_000_000 }, private val fetch: PlexFetch) {
+  constructor(api: PlexApi) : this(fetch = api::get)
 
   private val cacheMutex = Mutex()
-  private val cache = object : LinkedHashMap<CacheKey, Any>(MAX_CACHED_RESPONSES, 0.75f, true) {
-    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, Any>?): Boolean =
+  private val cache = object : LinkedHashMap<CacheKey, CachedResponse>(MAX_CACHED_RESPONSES, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, CachedResponse>?): Boolean =
       size > MAX_CACHED_RESPONSES
   }
+
+  private val inFlight = mutableMapOf<CacheKey, CompletableDeferred<Any>>()
+  private var generation = 0L
 
   suspend fun musicLibraries(credentials: PlexCredentials): List<PlexLibrary> =
     cachedParsed(credentials, "/library/sections", parser = PlexXmlParser::libraries)
@@ -93,7 +98,12 @@ class PlexRepository internal constructor(private val fetch: PlexFetch) {
   }
 
   suspend fun clearCache() {
-    cacheMutex.withLock { cache.clear() }
+    cacheMutex.withLock {
+      generation++
+      cache.clear()
+      inFlight.values.forEach { it.cancel() }
+      inFlight.clear()
+    }
   }
 
   private suspend fun <T : Any> cachedParsed(
@@ -102,22 +112,41 @@ class PlexRepository internal constructor(private val fetch: PlexFetch) {
     query: Map<String, String> = emptyMap(),
     parser: (String) -> T,
   ): T {
-    val key = CacheKey(credentials.cacheIdentity, path, query)
-    cacheMutex.withLock {
+    val key = CacheKey(credentials.cacheScope, path, query)
+    var owner = false
+    var requestGeneration = 0L
+    val pending = cacheMutex.withLock {
       @Suppress("UNCHECKED_CAST")
-      cache[key]?.let { return it as T }
+      cache[key]?.takeIf { now() - it.createdAt < CACHE_TTL_MS }?.let { return it.value as T }
+      inFlight[key] ?: CompletableDeferred<Any>().also {
+        owner = true
+        requestGeneration = generation
+        inFlight[key] = it
+      }
     }
-
-    val body = fetch(credentials, path, query, emptyMap())
-    val parsed = parse { parser(body) }
-
-    cacheMutex.withLock {
+    if (!owner) {
       @Suppress("UNCHECKED_CAST")
-      cache[key]?.let { return it as T }
-      cache[key] = parsed
+      return pending.await() as T
     }
-    return parsed
+    try {
+      val body = fetch(credentials, path, query, emptyMap())
+      val parsed = parse { parser(body) }
+      cacheMutex.withLock {
+        if (generation == requestGeneration) {
+          cache[key] = CachedResponse(parsed, now())
+          inFlight.remove(key)
+        }
+      }
+      pending.complete(parsed)
+      return parsed
+    } catch (failure: Throwable) {
+      cacheMutex.withLock { if (inFlight[key] === pending) inFlight.remove(key) }
+      pending.completeExceptionally(failure)
+      throw failure
+    }
   }
+
+  private data class CachedResponse(val value: Any, val createdAt: Long)
 
   private suspend fun <T> parse(block: () -> T): T =
     withContext(Dispatchers.Default) { block() }
@@ -133,11 +162,9 @@ class PlexRepository internal constructor(private val fetch: PlexFetch) {
     val query: Map<String, String>,
   )
 
-  private val PlexCredentials.cacheIdentity: String
-    get() = "${serverUrls.joinToString("|")}|${token.hashCode()}"
-
   private companion object {
-    const val MAX_CACHED_RESPONSES = 8
+    const val MAX_CACHED_RESPONSES = 24
+    const val CACHE_TTL_MS = 60_000L
     val commandIds = AtomicInteger(1)
   }
 }

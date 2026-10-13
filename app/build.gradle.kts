@@ -4,7 +4,6 @@ import java.util.Properties
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
-  alias(libs.plugins.kotlin.serialization)
 }
 
 val localProperties = Properties().apply {
@@ -74,6 +73,7 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = "com.nedrichards.plexwear"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 26
         targetSdk = 36
         versionCode = (
@@ -115,6 +115,7 @@ android {
         }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             buildConfigField("String", "DEBUG_PLEX_SERVER_URL", "\"\"")
             buildConfigField("String", "DEBUG_PLEX_TOKEN", "\"\"")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -155,6 +156,8 @@ dependencies {
 
   // Core Android dependencies
   implementation(libs.androidx.core.ktx)
+  // The older transitive annotation lint checks crash with the current AGP UAST.
+  implementation(libs.androidx.annotation.experimental)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.datastore.preferences)
@@ -169,11 +172,11 @@ dependencies {
   implementation(libs.androidx.compose.material3)
   implementation(libs.androidx.wear.compose.foundation)
   implementation(libs.androidx.wear.compose.material3)
-  implementation(libs.androidx.wear.compose.navigation)
   implementation(libs.androidx.wear.input)
   implementation(libs.androidx.media3.common)
   implementation(libs.androidx.media3.exoplayer)
   implementation(libs.androidx.media3.session)
+  implementation("androidx.work:work-runtime-ktx:2.10.5")
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
   // Instrumented tests
@@ -190,8 +193,4 @@ dependencies {
   androidTestImplementation(libs.androidx.test.runner)
   androidTestImplementation(libs.androidx.test.espresso.core)
 
-  // Navigation
-  implementation(libs.androidx.navigation3.ui)
-  implementation(libs.androidx.navigation3.runtime)
-  implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 }

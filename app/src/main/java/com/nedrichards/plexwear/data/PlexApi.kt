@@ -4,8 +4,7 @@ import com.nedrichards.plexwear.auth.PlexCredentials
 import java.net.HttpURLConnection
 import java.net.URL
 import javax.xml.parsers.DocumentBuilderFactory
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
 import org.w3c.dom.Element
 import org.xml.sax.InputSource
 
@@ -15,48 +14,37 @@ class PlexApi {
     path: String,
     query: Map<String, String> = emptyMap(),
     headers: Map<String, String> = emptyMap(),
-  ): String =
-    withContext(Dispatchers.IO) {
-      var lastFailure: Throwable? = null
-      credentials.serverUrls.forEach { serverUrl ->
-        runCatching {
-          get(PlexRequestBuilder.build(credentials.forServerUrl(serverUrl), path, query, headers))
-        }.onSuccess { body ->
-          return@withContext body
-        }.onFailure { throwable ->
-          lastFailure = throwable
+  ): String {
+    var lastFailure: Exception? = null
+    for (serverUrl in PlexConnectionResolver.orderedCredentials(credentials).serverUrls) {
+      kotlinx.coroutines.currentCoroutineContext().ensureActive()
+      try {
+        val request = PlexRequestBuilder.build(credentials.forServerUrl(serverUrl), path, query, headers)
+        val connection = (URL(request.url).openConnection() as HttpURLConnection).apply {
+          connectTimeout = 3_000
+          readTimeout = 12_000
+          requestMethod = "GET"
+          request.headers.forEach { (name, value) -> setRequestProperty(name, value) }
         }
+        val body = connection.executeCancellable { http ->
+          if (http.responseCode !in 200..299) throw PlexHttpException(http.responseCode)
+          http.inputStream.bufferedReader().use { it.readText() }
+        }
+        PlexConnectionResolver.succeeded(credentials, serverUrl)
+        return body
+      } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+      } catch (failure: PlexHttpException) {
+        if (failure.status == 401 || failure.status == 403) throw failure
+        PlexConnectionResolver.failed(credentials, serverUrl)
+        lastFailure = failure
+      } catch (failure: Exception) {
+        PlexConnectionResolver.failed(credentials, serverUrl)
+        lastFailure = failure
       }
-      throw lastFailure ?: IllegalStateException("Plex credentials are not configured")
     }
-
-  private fun get(request: PlexRequest): String {
-    val connection = (URL(request.url).openConnection() as HttpURLConnection).apply {
-      connectTimeout = 10_000
-      readTimeout = 20_000
-      requestMethod = "GET"
-      request.headers.forEach { (name, value) -> setRequestProperty(name, value) }
-    }
-
-    try {
-      val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
-      val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-      if (connection.responseCode !in 200..299) {
-        error("Plex returned HTTP ${connection.responseCode}: ${body.toPlexErrorSnippet()}")
-      }
-      return body
-    } finally {
-      connection.disconnect()
-    }
+    throw lastFailure ?: IllegalStateException("Plex credentials are not configured")
   }
 }
-
-private fun String.toPlexErrorSnippet(): String =
-  replace(Regex("<[^>]+>"), " ")
-    .replace(Regex("\\s+"), " ")
-    .trim()
-    .ifBlank { "No response body" }
-    .take(120)
 
 object PlexXmlParser {
   fun libraries(xml: String): List<PlexLibrary> = parseTags(xml, "Directory").mapNotNull { attrs ->
@@ -110,6 +98,7 @@ object PlexXmlParser {
         ?: trackElement.optionalAttr("grandparentThumb"),
       partKey = trackElement.firstNestedAttr("Part", "key") ?: trackElement.optionalAttr("mediaKey"),
       audioCodec = trackElement.firstNestedAttr("Media", "audioCodec"),
+      playlistEntryId = trackElement.optionalAttr("playlistItemID"),
     )
   }
 

@@ -9,7 +9,7 @@ import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.w3c.dom.Element
-import org.xml.sax.InputSource
+
 
 data class PlexPin(
   val id: String,
@@ -35,22 +35,16 @@ class PlexAuthClient(
     PlexAuthXmlParser.authToken(body)
   }
 
-  suspend fun credentialsForToken(token: String): PlexCredentials = withContext(Dispatchers.IO) {
-    val body = request(
-      method = "GET",
-      path = "/api/v2/resources",
-      query = mapOf(
-        "includeHttps" to "1",
-        "includeRelay" to "1",
-        "X-Plex-Token" to token,
-      ),
-      token = token,
-    )
-    PlexAuthXmlParser.credentials(
-      xml = body,
-      accountToken = token,
-      fallbackServerUrl = BuildConfig.DEBUG_PLEX_SERVER_URL.takeIf { BuildConfig.DEBUG },
-    )
+  suspend fun credentialsForToken(token: String): PlexCredentials = serversForToken(token).first().credentials
+
+  suspend fun serversForToken(token: String): List<PlexServerChoice> = withContext(Dispatchers.IO) {
+    val body = request("GET", "/api/v2/resources",
+      mapOf("includeHttps" to "1", "includeRelay" to "1"), token)
+    PlexAuthXmlParser.servers(body, token).ifEmpty {
+      val fallback = BuildConfig.DEBUG_PLEX_SERVER_URL.takeIf { BuildConfig.DEBUG }.orEmpty()
+      check(fallback.isNotBlank()) { "No Plex server connection was found for this account" }
+      listOf(PlexServerChoice(fallback, "Plex server", PlexCredentials(fallback, token)))
+    }
   }
 
   private fun request(
@@ -107,6 +101,15 @@ object PlexAuthXmlParser {
     accountToken: String? = null,
     fallbackServerUrl: String? = null,
   ): PlexCredentials {
+    servers(xml, accountToken).firstOrNull()?.let { return it.credentials }
+    val debugServerUrl = fallbackServerUrl.orEmpty().trim().trimEnd('/')
+    if (debugServerUrl.isNotBlank() && !accountToken.isNullOrBlank()) {
+      return PlexCredentials(debugServerUrl, accountToken)
+    }
+    error("No Plex server connection was found for this account")
+  }
+
+  fun servers(xml: String, accountToken: String? = null): List<PlexServerChoice> {
     val document = parsePlexXml(xml)
     val servers = document.elements("Device", "device", "Resource", "resource")
       .filter { device ->
@@ -133,40 +136,34 @@ object PlexAuthXmlParser {
           .distinctBy { it.serverUrl }
           .toList()
         if (connections.isEmpty()) return@mapNotNull null
-        PlexServerResource(token = token, owned = owned, connections = connections)
+        PlexServerResource(token = token, owned = owned, connections = connections,
+          machineId = device.attr("clientIdentifier"), name = device.attr("name").ifBlank { "Plex server" })
       }
       .toList()
 
-    val selected = servers
-      .sortedWith(
-        compareByDescending<PlexServerResource> { if (it.owned) 1 else 0 }
-          .thenBy { if (it.bestConnection.relay) 1 else 0 }
-          .thenByDescending { if (it.bestConnection.local) 1 else 0 }
-          .thenByDescending { if (it.bestConnection.https) 1 else 0 },
+    return servers.sortedWith(
+      compareByDescending<PlexServerResource> { if (it.owned) 1 else 0 }
+        .thenBy { if (it.bestConnection.relay) 1 else 0 }
+        .thenByDescending { if (it.bestConnection.local) 1 else 0 }
+        .thenByDescending { if (it.bestConnection.https) 1 else 0 },
+    ).map { server ->
+      val connections = server.connections.sortedWith(connectionComparator)
+      val credentials = PlexCredentials(
+        serverUrl = connections.first().serverUrl, token = server.token,
+        alternateServerUrls = connections.drop(1).map { it.serverUrl },
+        serverMachineIdentifier = server.machineId,
+        accountIdentifier = accountToken?.sha256().orEmpty(),
       )
-      .firstOrNull()
-
-    if (selected != null) {
-      val orderedConnections = selected.connections.sortedWith(connectionComparator)
-      return PlexCredentials(
-        serverUrl = orderedConnections.first().serverUrl,
-        token = selected.token,
-        alternateServerUrls = orderedConnections.drop(1).map { it.serverUrl },
-      )
+      PlexServerChoice(server.machineId.ifBlank { credentials.cacheScope }, server.name, credentials)
     }
-
-    val debugServerUrl = fallbackServerUrl.orEmpty().trim().trimEnd('/')
-    if (debugServerUrl.isNotBlank() && !accountToken.isNullOrBlank()) {
-      return PlexCredentials(debugServerUrl, accountToken)
-    }
-
-    error("No Plex server connection was found for this account")
   }
 
   private data class PlexServerResource(
     val token: String,
     val owned: Boolean,
     val connections: List<PlexServerConnection>,
+    val machineId: String,
+    val name: String,
   ) {
     val bestConnection: PlexServerConnection = connections.sortedWith(connectionComparator).first()
   }

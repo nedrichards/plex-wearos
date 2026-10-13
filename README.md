@@ -19,7 +19,8 @@ or resume other active Plex players.
   current playback from other screens.
 - Local-first server access with remote Plex connection fallbacks.
 - Automatic playback fallback between direct and transcoded stream URLs.
-- Manual and automatic offline caching of AAC files in app-private storage.
+- Durable manual downloads of AAC files and an optional bounded automatic cache.
+- Offline Downloads library, persistent collection order, and pinned playlists.
 - Remote play/pause control for active Plex sessions.
 
 This is intentionally watch-first. The app does not require a companion phone
@@ -27,7 +28,8 @@ app and does not try to reproduce the full Plex browse UI.
 
 ## App flow
 
-The home screen is the main hub:
+The home screen is the main hub. Resume/Now Playing and Downloads are near the top,
+followed by pinned playlists and browsing:
 
 - `Playlists` opens audio playlists.
 - `Active streams` lists current Plex sessions that can be paused or resumed.
@@ -40,8 +42,9 @@ screens. When music is playing, a compact Now Playing action remains available
 above the current screen content.
 
 Album, playlist, and browse screens expose a compact search icon rather than a
-full-width search row. Search filters loaded rows locally and matches album,
-playlist, track, artist, and album text where available. Browse views load 50
+full-width search row. Search explicitly filters loaded pages and matches album, playlist, track,
+artist, and album text where available. Search more pages requests another page
+only when chosen; filtering does not automatically scan a whole collection. Browse views load 50
 rows at a time and automatically request the next page near the end of a list.
 
 ## Plex sign-in
@@ -74,8 +77,10 @@ empty strings, so secrets are not compiled into release artifacts.
 ## Playback
 
 Selecting a track from an album or playlist opens track actions for playback and
-download. `Play all` queues the loaded or filtered track list and opens the Now
-Playing screen.
+download. `Play collection` starts the loaded tracks promptly and appends remaining
+collection pages. `Play results` queues the filtered loaded tracks. Both open Now
+Playing. Queue metadata and transport state come from the media service when the
+app reopens.
 
 Playback uses these rules:
 
@@ -83,8 +88,8 @@ Playback uses these rules:
 - FLAC direct plays when the active Plex server URL looks local/private.
 - FLAC and unknown codecs prefer Plex's HTTP AAC transcode endpoint when the
   active connection looks remote.
-- If the first playback plan fails during startup, the app retries with the next
-  direct/transcode/server fallback.
+- If a track fails, the service retries that occurrence using its remaining
+  direct/transcode/server alternatives without replacing the entire queue.
 - If a local cached file exists, playback prefers it and keeps a streaming
   fallback available.
 
@@ -93,23 +98,27 @@ then exposes pause/resume, previous, and next controls.
 
 ## Offline playback
 
-`Download` on a track list stores the whole loaded album or playlist. Individual
-tracks can be downloaded from the selected track action screen.
+`Download collection` schedules the entire album or playlist, including pages not
+loaded on screen. Filtered `Download results` saves the visible matching tracks.
+Track actions support individual downloads, removal and replacement at a new
+quality. A durable WorkManager queue exposes progress, cancellation and retry.
 
-The app also automatically caches tracks after playback starts. Downloaded
-tracks are stored under the app's private `offline-media` directory on the
-watch. Settings shows the total download size and has a `Clear downloads`
-action.
+Downloads are indexed by server and account, with persistent track metadata and
+ordered collections. Open `Downloads` after restarting without server access to
+find saved music. Repeated playlist tracks retain their order while sharing a
+single stored audio file per track and quality. Pinned downloads have a 1 GB
+budget per server/account scope, and every transfer respects remaining disk space.
 
-Settings cycles the download/transcode quality between:
+Automatic caching defaults to off. When enabled in Settings it caches one
+upcoming track on an unmetered connection while charging, using a separate
+256 MB expendable cache. It does not download the entire playback queue.
 
-- Data saver, 96k AAC
-- Balanced, 192k AAC
-- High, 320k AAC
-
-The selected quality applies to new downloads, automatic caching, and Plex
-transcode streams. Existing downloads keep the quality they were cached at until
-they are cleared or replaced.
+Settings offers explicit quality choices: Data saver (96k AAC), Balanced
+(192k AAC), and High (320k AAC). A new quality affects new downloads and
+transcodes; use a track's replacement action to save it at that quality.
+Settings also allows selecting a discovered server and signing out. Both stop
+current playback and cancel active download work before changing the account or
+server.
 
 ## Remote control
 
@@ -156,6 +165,7 @@ launcher resource `res/mipmap-anydpi-v26/ic_launcher.xml`.
 
 ## Documentation
 
+- [Review implementation and validation](docs/app-review-resolution.md) records the current changes.
 - [App design](docs/app-design.md) describes the screen structure, playback
   policy, offline cache, and icon-resource model.
 - [Android release signing](docs/android-release-signing.md) describes optional

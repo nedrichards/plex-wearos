@@ -105,6 +105,17 @@ class PlexMediaItemsTest {
   }
 
   @Test
+  fun cachedFilePreservesEveryDirectTranscodeAndAlternateRoute() {
+    val credentials = PlexCredentials("http://192.168.1.2:32400", "token",
+      alternateServerUrls = listOf("https://remote.example.test:32400"))
+    val song = track("flac", "/library/parts/42/file.flac")
+    val streaming = PlexMediaItems.playbackPlanSpec(credentials, song)
+    val cached = PlexMediaItems.playbackPlanSpec(credentials, song, cachedUri = "file:///offline/song.aac")
+    assertEquals(listOf(streaming.primary) + streaming.fallbacks, cached.fallbacks)
+    assertEquals(4, cached.fallbacks.size)
+  }
+
+  @Test
   fun playbackPlan_usesTranscodeWithDirectFallbackForUnknownCodecs() {
     val plan = PlexMediaItems.playbackPlanSpec(
       credentials = PlexCredentials("https://plex.example.test", "token"),

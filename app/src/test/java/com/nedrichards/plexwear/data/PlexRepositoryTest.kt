@@ -3,8 +3,12 @@ package com.nedrichards.plexwear.data
 import com.nedrichards.plexwear.auth.PlexCredentials
 import junit.framework.TestCase.assertEquals
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Test
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class PlexRepositoryTest {
   private val credentials = PlexCredentials(
     serverUrl = "https://plex.example.test",
@@ -76,6 +80,34 @@ class PlexRepositoryTest {
     assertEquals("50", queries[0]["X-Plex-Container-Size"])
     assertEquals("50", queries[1]["X-Plex-Container-Start"])
     assertEquals(2, queries.size)
+  }
+
+  @Test
+  fun concurrentIdenticalPagesShareOneFetch() = runTest {
+    val body = CompletableDeferred<String>()
+    var requests = 0
+    val repository = PlexRepository { _, _, _, _ -> requests++; body.await() }
+    val library = PlexLibrary("1", "Music", "artist")
+    val first = async { repository.albums(credentials, library) }
+    val second = async { repository.albums(credentials, library) }
+    runCurrent()
+    assertEquals(1, requests)
+    body.complete(albumsXml("Shared"))
+    assertEquals(first.await(), second.await())
+  }
+
+  @Test
+  fun expiredRecentMusicRefreshesAndRouteChangeKeepsCacheIdentity() = runTest {
+    var now = 0L
+    var requests = 0
+    val repository = PlexRepository(now = { now }) { _, _, _, _ -> requests++; "<MediaContainer/>" }
+    val routed = credentials.copy(alternateServerUrls = listOf("https://remote.test"))
+    repository.recentMusic(routed)
+    repository.recentMusic(routed.forServerUrl("https://remote.test"))
+    assertEquals(1, requests)
+    now = 60_001
+    repository.recentMusic(routed)
+    assertEquals(2, requests)
   }
 
   private fun albumsXml(title: String): String = """

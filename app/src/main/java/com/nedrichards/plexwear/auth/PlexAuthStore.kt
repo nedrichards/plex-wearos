@@ -6,6 +6,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.nedrichards.plexwear.BuildConfig
+import java.security.MessageDigest
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -13,6 +16,8 @@ data class PlexCredentials(
   val serverUrl: String,
   val token: String,
   val alternateServerUrls: List<String> = emptyList(),
+  val serverMachineIdentifier: String = "",
+  val accountIdentifier: String = "",
 ) {
   val serverUrls: List<String> =
     (listOf(serverUrl) + alternateServerUrls)
@@ -21,12 +26,21 @@ data class PlexCredentials(
       .distinct()
   val isConfigured: Boolean = serverUrls.isNotEmpty() && token.isNotBlank()
 
+  val cacheScope: String
+    get() = ((serverMachineIdentifier.ifBlank { serverUrls.sorted().joinToString("|") }) + "|" +
+      accountIdentifier.ifBlank { token }).sha256()
+
   fun forServerUrl(serverUrl: String): PlexCredentials =
     copy(
       serverUrl = serverUrl.trim().trimEnd('/'),
       alternateServerUrls = serverUrls.filterNot { it == serverUrl.trim().trimEnd('/') },
     )
 }
+
+internal fun String.sha256(): String = MessageDigest.getInstance("SHA-256")
+  .digest(toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+data class PlexServerChoice(val id: String, val name: String, val credentials: PlexCredentials)
 
 private val Context.plexAuthDataStore by preferencesDataStore(name = "plex_auth")
 
@@ -37,6 +51,8 @@ class PlexAuthStore(context: Context) {
     PlexCredentials(
       serverUrl = preferences[SERVER_URL].orEmpty(),
       token = preferences[TOKEN].orEmpty(),
+      serverMachineIdentifier = preferences[SERVER_ID].orEmpty(),
+      accountIdentifier = preferences[ACCOUNT_ID].orEmpty(),
       alternateServerUrls = preferences[ALTERNATE_SERVER_URLS]
         .orEmpty()
         .lineSequence()
@@ -44,6 +60,38 @@ class PlexAuthStore(context: Context) {
         .filter { it.isNotBlank() }
         .toList(),
     )
+  }
+
+  val servers: Flow<List<PlexServerChoice>> = dataStore.data.map { preferences ->
+    val raw = preferences[SERVERS] ?: return@map emptyList()
+    runCatching {
+      val array = JSONArray(raw)
+      (0 until array.length()).map { index ->
+        val item = array.getJSONObject(index)
+        val urls = item.getJSONArray("urls")
+        PlexServerChoice(item.getString("id"), item.getString("name"), PlexCredentials(
+          serverUrl = urls.getString(0), token = item.getString("token"),
+          alternateServerUrls = (1 until urls.length()).map(urls::getString),
+          serverMachineIdentifier = item.optString("machineId"), accountIdentifier = item.optString("accountId"),
+        ))
+      }
+    }.getOrDefault(emptyList())
+  }
+
+  val accountToken: Flow<String> = dataStore.data.map { it[ACCOUNT_TOKEN].orEmpty() }
+
+  suspend fun saveServers(servers: List<PlexServerChoice>, accountToken: String) {
+    dataStore.edit { preferences ->
+      val array = JSONArray()
+      servers.forEach { choice ->
+        array.put(JSONObject().put("id", choice.id).put("name", choice.name)
+          .put("token", choice.credentials.token).put("urls", JSONArray(choice.credentials.serverUrls))
+          .put("machineId", choice.credentials.serverMachineIdentifier)
+          .put("accountId", choice.credentials.accountIdentifier))
+      }
+      preferences[SERVERS] = array.toString()
+      preferences[ACCOUNT_TOKEN] = accountToken
+    }
   }
 
   val debugSeeded: Flow<Boolean> = dataStore.data.map { preferences ->
@@ -74,6 +122,8 @@ class PlexAuthStore(context: Context) {
     dataStore.edit { preferences ->
       preferences[SERVER_URL] = credentials.serverUrls.firstOrNull().orEmpty()
       preferences[TOKEN] = credentials.token.trim()
+      preferences[SERVER_ID] = credentials.serverMachineIdentifier
+      preferences[ACCOUNT_ID] = credentials.accountIdentifier
       val alternateServerUrls = credentials.serverUrls.drop(1)
       if (alternateServerUrls.isEmpty()) {
         preferences.remove(ALTERNATE_SERVER_URLS)
@@ -89,11 +139,20 @@ class PlexAuthStore(context: Context) {
       preferences.remove(SERVER_URL)
       preferences.remove(TOKEN)
       preferences.remove(ALTERNATE_SERVER_URLS)
-      preferences.remove(DEBUG_SEEDED)
+      // Explicit Sign out must not silently restore compiled debug credentials on next launch.
+      preferences[DEBUG_SEEDED] = true
+      preferences.remove(SERVER_ID)
+      preferences.remove(ACCOUNT_ID)
+      preferences.remove(SERVERS)
+      preferences.remove(ACCOUNT_TOKEN)
     }
   }
 
   companion object {
+    private val SERVER_ID = stringPreferencesKey("server_machine_id")
+    private val ACCOUNT_ID = stringPreferencesKey("account_id")
+    private val SERVERS = stringPreferencesKey("servers")
+    private val ACCOUNT_TOKEN = stringPreferencesKey("account_token")
     private val SERVER_URL = stringPreferencesKey("server_url")
     private val ALTERNATE_SERVER_URLS = stringPreferencesKey("alternate_server_urls")
     private val TOKEN = stringPreferencesKey("token")

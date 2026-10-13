@@ -1,6 +1,7 @@
 package com.nedrichards.plexwear.offline
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -16,6 +17,10 @@ class OfflineSettingsStore(context: Context) {
     OfflineQuality.fromBitrateKbps(preferences[QUALITY_BITRATE_KBPS] ?: OfflineQuality.Default.bitrateKbps)
   }
 
+  val autoCacheEnabled: Flow<Boolean> = dataStore.data.map { it[AUTO_CACHE_ENABLED] ?: false }
+
+  suspend fun setAutoCacheEnabled(enabled: Boolean) { dataStore.edit { it[AUTO_CACHE_ENABLED] = enabled } }
+
   suspend fun setQuality(quality: OfflineQuality) {
     dataStore.edit { preferences ->
       preferences[QUALITY_BITRATE_KBPS] = quality.bitrateKbps
@@ -23,6 +28,7 @@ class OfflineSettingsStore(context: Context) {
   }
 
   companion object {
+    private val AUTO_CACHE_ENABLED = booleanPreferencesKey("auto_cache_enabled")
     private val QUALITY_BITRATE_KBPS = intPreferencesKey("quality_bitrate_kbps")
   }
 }

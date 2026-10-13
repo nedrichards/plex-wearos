@@ -35,7 +35,9 @@ The app is a single Android application module:
 - `PlexApi`, `PlexRequestBuilder`, and `PlexXmlParser` handle raw Plex HTTP and
   XML parsing.
 - `PlaybackService` and `PlaybackController` wrap Media3 playback.
-- `OfflineCacheManager` owns app-private downloaded AAC files.
+- `OfflineCacheManager` owns the durable, scoped download catalogue and WorkManager queue.
+- `PlexConnectionResolver` shares working routes across browsing, artwork, playback and downloads.
+- `HomeSnapshotStore` retains a small last-used Home snapshot and pinned playlists.
 - `OfflineSettingsStore` owns the preferred download/transcode quality.
 
 The app uses DataStore for local auth and offline settings. There is no server
@@ -64,7 +66,7 @@ the generated debug credential fields empty.
 
 ## Screen model
 
-The home screen is the hub:
+The home screen is the hub. Resume and Downloads take priority, followed by pinned playlists and browsing:
 
 - `Playlists`
 - `Active streams`
@@ -88,7 +90,7 @@ of a persistent full-width navigation row.
 
 ## List actions
 
-Search is a compact icon control, not a full-width list row. The search action
+Search is a compact control for filtering loaded pages; Search more pages explicitly adds another page. The search action
 uses Android remote input so the system can offer voice or keyboard input. An
 active query is shown inline with compact search and clear controls.
 
@@ -120,9 +122,9 @@ Current stream preference:
 - Alternate server URLs are appended as fallbacks.
 - Cached local files are tried before streaming.
 
-If the first plan fails before playback becomes ready, the controller retries
-with the next fallback plan. This is a startup fallback, not a long-running
-network recovery system.
+The service retries the failing track occurrence through its remaining source
+chain, preserving queue and position. The controller reconnects on UI startup
+and reconstructs the service queue and transport state.
 
 Now Playing tracks the current queue in UI state. It exposes pause/resume,
 previous, and next controls directly rather than hiding transport behind another
@@ -130,22 +132,23 @@ status screen.
 
 ## Offline cache
 
-Manual downloads and automatic playback caching both go through
-`OfflineCacheManager`.
+Manual downloads and optional automatic caching both go through
+`OfflineCacheManager`, with WorkManager constraints and persistent jobs.
 
-Downloaded media is stored in app-private storage under `offline-media` as AAC
-files named from the Plex track rating key and selected quality. The cache
-snapshot drives downloaded/downloading status in the UI and total size in
-Settings.
+Media identity includes server machine/account scope, track rating key and
+quality. The catalogue retains title, artist, album, collection membership and
+ordered playlist occurrences; the Downloads destination works after restart
+without contacting the server. Clear, removal and cancellation coordinate with
+active writers, while incomplete files are excluded from the playable index.
 
-Offline quality is stored separately and cycles through:
+A collection download discovers all pages durably. Filtered Download results
+shares the Play results scope. Quality choices are explicit, and existing media
+can be replaced at a new quality from track actions.
 
-- Data saver, 96k AAC
-- Balanced, 192k AAC
-- High, 320k AAC
-
-Changing the quality affects new transcode streams and new downloads. Existing
-cached files remain until cleared or replaced.
+Automatic caching defaults off. If enabled it caches one upcoming track while
+charging on an unmetered connection, with a 256 MB eviction budget. Pinned
+manual downloads have a separate 1 GB budget per server/account scope. Space
+checks reserve room for normal app operation.
 
 ## Remote control
 
@@ -160,7 +163,8 @@ control useful without turning the watch app into a full Plex remote.
 
 Album, playlist, and track views request Plex in 50-row server pages. The app
 shows the initial rows promptly and requests another page near the end of the
-list. Pages participate in the small in-memory browse cache, keeping
+list. Pages participate in a bounded, expiring in-memory browse cache with shared
+in-flight requests, keeping
 back-and-forth navigation responsive without loading an entire library into
 memory on first visit.
 
@@ -185,11 +189,17 @@ not only the raw 108dp canvas.
 
 ## Validation
 
+[Implementation evidence](app-review-resolution.md) records the current changes
+and their validation limits. Connected journeys exercise the production media
+service, offline manager, view model and Wear Compose UI.
+
+
 Standard local validation:
 
 ```sh
 export GRADLE_USER_HOME="$PWD/.gradle-local"
-./gradlew testDebugUnitTest assembleDebug assembleRelease
+./gradlew testDebugUnitTest lintDebug lintRelease assembleDebug assembleRelease
+./gradlew connectedDebugAndroidTest
 ```
 
 Check the packaged watch gate and launcher resource:
