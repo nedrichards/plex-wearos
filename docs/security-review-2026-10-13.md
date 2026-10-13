@@ -4,7 +4,7 @@
 
 Code-scanning alert [1](https://github.com/nedrichards/plex-wearos/security/code-scanning/1) reports `java/xxe` in the shared authentication/music XML parser. The old implementation rejected the literal DOCTYPE string and used a throwing entity resolver, but left DOM parser features at their defaults.
 
-The replacement parses through SAX with external general and parameter entities disabled. A mandatory lexical handler throws on every DTD before its declarations are processed. A throwing resolver remains as a second guard. Unsupported security features or lexical-handler registration fail closed. DOM is constructed from SAX events; the DOM builder never parses network data. Android's DOM factory does not support the Xerces security features, so configuring those unconditionally would break authentication and browsing on Wear OS.
+The replacement parses through SAX with external general and parameter entities disabled. A mandatory lexical handler throws on every DTD before its declarations are processed. A throwing resolver remains as a second guard. External entity controls and lexical-handler registration are mandatory and fail closed. External DTD loading is additionally disabled where supported; Android Expat lacks that Xerces feature, so the mandatory DTD-rejection callback enforces rejection there. DOM is constructed from SAX events; the DOM builder never parses network data. Android's DOM factory does not support the Xerces security features, so configuring those unconditionally would break authentication and browsing on Wear OS.
 
 Regression tests exercise local-file entities, HTTP DTDs, parameter entities, internal expansion, authentication, malformed XML, predefined entities, Unicode and nested media metadata. Android instrumentation covers the platform parser as well as JVM unit tests.
 
@@ -19,7 +19,7 @@ Live open alerts are all transitive dependencies of the build tooling, reported 
 | [14](https://github.com/nedrichards/plex-wearos/security/dependabot/14) | jose4j | 0.9.5 | 0.9.6 | AGP → bundletool | Keep open; awaiting parent update |
 | [12](https://github.com/nedrichards/plex-wearos/security/dependabot/12) | jdom2 | 2.0.6 | 2.0.6.1 | AGP → Jetifier processor | Keep open; awaiting parent update |
 | [8](https://github.com/nedrichards/plex-wearos/security/dependabot/8) | commons-lang3 | 3.16.0 | 3.18.0 | AGP → sdk-common/repository/sdklib → Commons Compress | Keep open; awaiting parent update |
-| [1](https://github.com/nedrichards/plex-wearos/security/dependabot/1) | httpclient | 4.5.14 | 4.5.13 | AGP → httpmime and analytics crash | Submitted graph also contains requested 4.5.6; Gradle buildEnvironment resolves 4.5.6 → 4.5.14. No dependency override required. |
+| [1](https://github.com/nedrichards/plex-wearos/security/dependabot/1) | httpclient | 4.5.14 | 4.5.13 | AGP → httpmime and analytics crash | Submitted graph also contains requested 4.5.6; Gradle buildEnvironment resolves 4.5.6 → 4.5.14. Dismissed as inaccurate after checking the resolved classpath; no dependency override required. |
 
 Evidence: GitHub Dependabot API and submitted SPDX SBOM; local `./gradlew --offline buildEnvironment`; Google Maven and Gradle Plugin Portal release metadata and upstream AGP POMs. These dependencies run in build tooling; this is not a claim that every advisory is unexploitable in a build environment.
 

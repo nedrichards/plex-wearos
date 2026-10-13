@@ -7,6 +7,8 @@ import org.w3c.dom.Node
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
 import org.xml.sax.SAXException
+import org.xml.sax.SAXNotRecognizedException
+import org.xml.sax.SAXNotSupportedException
 import org.xml.sax.SAXParseException
 import org.xml.sax.ext.DefaultHandler2
 
@@ -18,9 +20,17 @@ internal fun parsePlexXml(xml: String): Document {
   val reader = SAXParserFactory.newInstance().apply {
     isNamespaceAware = false
     isValidating = false
-    setFeature("http://xml.org/sax/features/external-general-entities", false)
-    setFeature("http://xml.org/sax/features/external-parameter-entities", false)
   }.newSAXParser().xmlReader
+  reader.setFeature("http://xml.org/sax/features/external-general-entities", false)
+  reader.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+  try {
+    reader.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+  } catch (_: SAXNotRecognizedException) {
+    // Android Expat lacks this Xerces feature. The mandatory startDTD guard below
+    // rejects the document before external DTD loading or internal expansion.
+  } catch (_: SAXNotSupportedException) {
+    // Implementations that cannot disable DTD loading still must install that guard.
+  }
   // Fail closed if the implementation cannot register the DTD-rejection callback.
   reader.setProperty("http://xml.org/sax/properties/lexical-handler", handler)
   reader.contentHandler = handler
