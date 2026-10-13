@@ -3,10 +3,8 @@ package com.nedrichards.plexwear.data
 import com.nedrichards.plexwear.auth.PlexCredentials
 import java.net.HttpURLConnection
 import java.net.URL
-import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.ensureActive
 import org.w3c.dom.Element
-import org.xml.sax.InputSource
 
 class PlexApi {
   suspend fun get(
@@ -155,12 +153,3 @@ object PlexXmlParser {
       .firstOrNull { it.isNotBlank() }
   }
 }
-
-internal fun parsePlexXml(xml: String) =
-  require(!xml.contains("<!DOCTYPE", ignoreCase = true)) { "DOCTYPE declarations are not supported" }
-    .let {
-      DocumentBuilderFactory.newInstance()
-        .newDocumentBuilder()
-        .apply { setEntityResolver { _, _ -> error("External XML entities are not supported") } }
-        .parse(InputSource(xml.reader()))
-    }

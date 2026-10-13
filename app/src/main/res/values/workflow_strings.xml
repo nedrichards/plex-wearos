@@ -1,0 +1,10 @@
+<resources>
+    <string name="workflow_refresh_failed">Can\'t refresh this section. Downloads remain available.</string>
+    <string name="workflow_page_failed">Couldn\'t load music. Tap Retry.</string>
+    <string name="workflow_queue_failed">Couldn\'t finish loading the queue. Open the playlist to try again.</string>
+    <string name="workflow_action_failed">Couldn\'t complete this action. Please try again.</string>
+    <string name="workflow_request_pin">Requesting sign-in code…</string>
+    <string name="workflow_enter_pin">Enter this code at plex.tv/link.</string>
+    <string name="workflow_pin_timeout">Sign-in timed out. Try again.</string>
+    <string name="workflow_pin_failed">Sign-in failed. Try again.</string>
+</resources>
