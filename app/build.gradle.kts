@@ -176,7 +176,7 @@ dependencies {
   implementation(libs.androidx.media3.common)
   implementation(libs.androidx.media3.exoplayer)
   implementation(libs.androidx.media3.session)
-  implementation("androidx.work:work-runtime-ktx:2.10.5")
+  implementation("androidx.work:work-runtime-ktx:2.12.0")
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
   // Instrumented tests
