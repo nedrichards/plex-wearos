@@ -18,6 +18,8 @@ jobs:
       TZ: Europe/London
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
@@ -25,6 +27,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
       - name: Verify tests, lint, debug and release builds
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug lintRelease assembleDebug assembleRelease
+      - name: Record tested APK provenance
+        run: |
+          mkdir -p .ci-results
+          printf 'Built checkout: %s\nRunner: %s\n' "$GITHUB_SHA" "$RUNNER_ARCH" > .ci-results/BUILD_INFO.txt
+          find . -path '*/build/outputs/apk/*' -name '*.apk' -type f -print0 | sort -z | xargs -0 -r sha256sum > .ci-results/SHA256SUMS
       - name: Upload installable debug APKs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -54,6 +61,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Preserve APK provenance
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: plex-wearos-build-info-${{ github.sha }}
+          path: .ci-results/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
   release:
     name: Draft development APK release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -62,8 +78,12 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: '*debug*'
@@ -81,7 +101,11 @@ jobs:
               raise SystemExit('No debug APKs were downloaded')
           SCRIPT
           cd release-apks
-          sha256sum *.apk > SHA256SUMS
+          sha256sum -- ./*.apk > SHA256SUMS
+      - name: Attest tested development APKs
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: release-apks/*.apk
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -90,3 +114,6 @@ jobs:
           gh release create "$RELEASE_TAG" release-apks/* --verify-tag --draft \
             --title "$RELEASE_TAG development APKs" \
             --notes "Verified debug APKs for installation and testing. Signed with a disposable CI debug key; updates from other builds may require reinstalling. Production-signed distribution requires the app's release keystore and versioning procedure. SHA256SUMS is attached."
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true

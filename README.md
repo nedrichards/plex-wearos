@@ -170,3 +170,5 @@ launcher resource `res/mipmap-anydpi-v26/ic_launcher.xml`.
   policy, offline cache, and icon-resource model.
 - [Android release signing](docs/android-release-signing.md) describes optional
   real release signing and local debug-signed release builds.
+
+For hosted checks and artifacts, see [continuous integration](docs/CI.md).
