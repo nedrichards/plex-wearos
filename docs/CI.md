@@ -19,3 +19,8 @@ Workflow syntax and shell snippets are checked locally before publication. Hoste
 execution provides the architecture and installed-artifact evidence; generated
 captures still require human visual review. No release or tag is created by this
 maintenance change.
+
+The AndroidX update is verified together with AGP 9.5.1 and compile SDK 37.
+Target SDK remains 36, so this build compatibility change does not opt into a
+new target-SDK behavior level. Phone-independent Wear instrumentation remains
+part of the required journey workflow.
